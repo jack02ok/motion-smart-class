@@ -4,7 +4,7 @@
  */
 
 import confetti from "canvas-confetti";
-import { escapeHTML, safeColor } from "../utils/security.js";
+import { escapeHTML, safeColor, safeImageUrl } from "../utils/security.js";
 import { GAME_STATES, GAME_MODES, ADVENTURE_STAGES } from "./GameEngine.js";
 import { GESTURE_TYPES, GESTURE_LABELS } from "./GestureEngine.js";
 import { CAMERA_STATUS } from "./CameraManager.js";
@@ -311,6 +311,19 @@ export class UIManager {
                     <textarea id="new-q-passage" rows="2" placeholder="Tuliskan teks cerita singkat atau data pendukung..."></textarea>
                   </div>
 
+                  <div class="question-media-editor">
+                    <div class="form-group">
+                      <label>Gambar Pendukung (Opsional — URL HTTPS):</label>
+                      <input type="url" id="new-q-image-url" placeholder="https://contoh.sch.id/gambar-soal.jpg" inputmode="url" />
+                      <small>Link gambar akan disimpan dan ikut diekspor dalam file JSON. Gunakan sumber yang aman dan memiliki izin penggunaan.</small>
+                    </div>
+                    <div class="form-group">
+                      <label>Deskripsi Gambar:</label>
+                      <input type="text" id="new-q-image-alt" maxlength="160" placeholder="Contoh: Diagram pecahan berbentuk lingkaran" />
+                    </div>
+                    <div id="new-q-image-preview" class="question-image-preview hidden" aria-live="polite"></div>
+                  </div>
+
                   <div class="form-group">
                     <label>Pertanyaan Soal:</label>
                     <input type="text" id="new-q-text" placeholder="Tuliskan pertanyaan soal di sini..." required />
@@ -412,6 +425,11 @@ export class UIManager {
                   <div class="form-group">
                     <label>Waktu Tahan Konfirmasi Jawaban (detik):</label>
                     <input type="number" id="setting-hold" min="0.3" max="1.5" step="0.1" value="0.45" />
+                  </div>
+                  <div class="form-group">
+                    <label>Waktu Bersiap Gerakan (detik):</label>
+                    <input type="number" id="setting-ready-countdown" min="3" max="10" step="1" value="5" />
+                    <small>Countdown sebelum soal dimulai agar siswa sempat mengambil posisi.</small>
                   </div>
                   <div class="form-group">
                     <label>Bobot Skor Standar (Poin):</label>
@@ -671,12 +689,14 @@ export class UIManager {
       const conf = parseFloat(document.getElementById("setting-confidence").value) || 0.6;
       const cooldown = parseFloat(document.getElementById("setting-cooldown").value) || 1.2;
       const hold = parseFloat(document.getElementById("setting-hold").value) || 0.45;
+      const readyCountdown = Math.min(10, Math.max(3, parseInt(document.getElementById("setting-ready-countdown").value, 10) || 5));
 
       StorageManager.saveSettings({
         timerSeconds: timer,
         confidenceThreshold: conf,
         cooldownSeconds: cooldown,
-        holdDurationSeconds: hold
+        holdDurationSeconds: hold,
+        readyCountdownSeconds: readyCountdown
       });
 
       this.gesture.setThresholds({
@@ -690,6 +710,14 @@ export class UIManager {
 
     document.getElementById("setting-confidence").addEventListener("input", (e) => {
       document.getElementById("setting-confidence-val").textContent = parseFloat(e.target.value).toFixed(2);
+    });
+
+    document.getElementById("new-q-image-url")?.addEventListener("input", () => {
+      this.updateQuestionImagePreview();
+    });
+    document.getElementById("new-q-image-alt")?.addEventListener("input", () => {
+      const previewImage = document.querySelector("#new-q-image-preview img");
+      if (previewImage) previewImage.alt = document.getElementById("new-q-image-alt").value.trim() || "Pratinjau gambar soal";
     });
 
     // Switch to Add Question Tab button
@@ -717,6 +745,13 @@ export class UIManager {
       this.audio.playClick();
 
       const editId = document.getElementById("edit-q-id").value;
+      const rawImageUrl = document.getElementById("new-q-image-url").value.trim();
+      const imageUrl = safeImageUrl(rawImageUrl);
+      if (rawImageUrl && !imageUrl) {
+        alert("Link gambar tidak valid. Gunakan URL HTTPS yang lengkap.");
+        document.getElementById("new-q-image-url").focus();
+        return;
+      }
       const questionData = {
         category: document.getElementById("new-q-category").value,
         grade: parseInt(document.getElementById("new-q-grade").value, 10),
@@ -734,6 +769,8 @@ export class UIManager {
         ],
         correctAnswer: parseInt(document.getElementById("new-q-correct").value, 10),
         explanation: document.getElementById("new-q-explanation").value.trim(),
+        imageUrl,
+        imageAlt: document.getElementById("new-q-image-alt").value.trim(),
         gestureMap: { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" }
       };
 
@@ -884,6 +921,7 @@ export class UIManager {
     document.getElementById("setting-confidence-val").textContent = settings.confidenceThreshold.toFixed(2);
     document.getElementById("setting-cooldown").value = settings.cooldownSeconds;
     document.getElementById("setting-hold").value = settings.holdDurationSeconds;
+    document.getElementById("setting-ready-countdown").value = settings.readyCountdownSeconds;
 
     // Cloud Firestore Events & Synchronization
     this.bindFirestoreEvents();
@@ -1186,9 +1224,14 @@ export class UIManager {
     container.innerHTML = `
       <div class="screen-home animate-fade-in">
         <div class="home-hero">
-          <div class="hero-badge">🌟 PETUALANGAN BELAJAR INTERAKTIF</div>
-          <h2 class="hero-title">Pilih Petualangan Kamu!</h2>
-          <p class="hero-subtitle">Jawab soal matematika dan membaca dengan gerakan tubuh di depan kamera!</p>
+          <div class="hero-badge">RUANG BELAJAR AKTIF • AMAN • INKLUSIF</div>
+          <h2 class="hero-title">Belajar lebih fokus.<br /><span>Bergerak lebih percaya diri.</span></h2>
+          <p class="hero-subtitle">Pengalaman numerasi dan literasi berbasis gerak untuk kelas yang sehat, menyenangkan, dan terarah.</p>
+          <div class="hero-trust-row" aria-label="Keunggulan aplikasi">
+            <span>🛡️ Privasi kamera terjaga</span>
+            <span>🎓 Dirancang untuk siswa SD</span>
+            <span>👩‍🏫 Kendali penuh untuk guru</span>
+          </div>
         </div>
 
         <!-- SPECIAL ONLINE MULTIPLAYER HERO BANNER -->
@@ -1961,14 +2004,35 @@ export class UIManager {
   // ==========================================
   // SCREEN 5: COUNTDOWN SCREEN
   // ==========================================
-  renderCountdownScreen(container, countValue = 3) {
+  renderCountdownScreen(container, countValue = 5) {
     container.innerHTML = `
       <div class="screen-countdown animate-scale-up">
-        <div class="countdown-circle">
-          <div id="countdown-number" class="countdown-number">${countValue}</div>
+        <div class="movement-ready-card">
+          <span class="ready-eyebrow">PERSIAPAN GERAK</span>
+          <div class="countdown-circle">
+            <div id="countdown-number" class="countdown-number">${escapeHTML(countValue)}</div>
+          </div>
+          <h2>Ambil posisi yang nyaman</h2>
+          <p class="countdown-tag">Pastikan tubuh terlihat kamera sebelum soal dimulai.</p>
+          <div class="ready-step-grid">
+            <span>① Berdiri tegak</span>
+            <span>② Jaga jarak aman</span>
+            <span>③ Siap bergerak</span>
+          </div>
         </div>
-        <p class="countdown-tag">BERSIAPLAH BERGERAK!</p>
       </div>
+    `;
+  }
+
+  renderQuestionImage(question, variant = "") {
+    const imageUrl = safeImageUrl(question?.imageUrl);
+    if (!imageUrl) return "";
+    const alt = question?.imageAlt || "Gambar pendukung soal";
+    const className = variant ? `question-media ${variant}` : "question-media";
+    return `
+      <figure class="${className}">
+        <img src="${escapeHTML(imageUrl)}" alt="${escapeHTML(alt)}" loading="lazy" referrerpolicy="no-referrer" />
+      </figure>
     `;
   }
 
@@ -2109,6 +2173,7 @@ export class UIManager {
 
         <!-- MAIN QUESTION CARD -->
         <div class="question-main-card">
+          ${this.renderQuestionImage(question)}
           <h2 class="question-title-text">${escapeHTML(question.question)}</h2>
         </div>
 
@@ -2670,6 +2735,7 @@ export class UIManager {
             </div>
           </div>
           ${q.passage ? `<p style="font-size: 0.85rem; color: #78350F; background: #FFFBEB; padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-style: italic;">"${escapeHTML(q.passage)}"</p>` : ""}
+          ${this.renderQuestionImage(q, "question-media-thumb")}
           <p class="q-item-text" style="margin-top: 6px;"><strong>${escapeHTML(q.question)}</strong></p>
           <div class="q-item-opts" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px;">
             ${q.options
@@ -2758,6 +2824,8 @@ export class UIManager {
     document.getElementById("new-q-time-limit").value = q.timeLimit || 40;
     document.getElementById("new-q-point-weight").value = q.pointWeight || 100;
     document.getElementById("new-q-passage").value = q.passage || "";
+    document.getElementById("new-q-image-url").value = q.imageUrl || "";
+    document.getElementById("new-q-image-alt").value = q.imageAlt || "";
     document.getElementById("new-q-text").value = q.question || "";
     document.getElementById("new-q-opt-a").value = q.options && q.options[0] ? q.options[0] : "";
     document.getElementById("new-q-opt-b").value = q.options && q.options[1] ? q.options[1] : "";
@@ -2765,6 +2833,7 @@ export class UIManager {
     document.getElementById("new-q-opt-d").value = q.options && q.options[3] ? q.options[3] : "";
     document.getElementById("new-q-correct").value = typeof q.correctAnswer === "number" ? q.correctAnswer : 0;
     document.getElementById("new-q-explanation").value = q.explanation || "";
+    this.updateQuestionImagePreview();
 
     // Show editing banner & update submit button
     const banner = document.getElementById("editing-banner");
@@ -2792,6 +2861,7 @@ export class UIManager {
     document.getElementById("edit-q-id").value = "";
     document.getElementById("new-q-time-limit").value = 40;
     document.getElementById("new-q-point-weight").value = 100;
+    this.updateQuestionImagePreview();
 
     const banner = document.getElementById("editing-banner");
     if (banner) banner.classList.add("hidden");
@@ -2801,6 +2871,38 @@ export class UIManager {
 
     const cancelBtn = document.getElementById("btn-cancel-edit");
     if (cancelBtn) cancelBtn.classList.add("hidden");
+  }
+
+  updateQuestionImagePreview() {
+    const preview = document.getElementById("new-q-image-preview");
+    const input = document.getElementById("new-q-image-url");
+    if (!preview || !input) return;
+
+    const rawUrl = input.value.trim();
+    preview.replaceChildren();
+    if (!rawUrl) {
+      preview.classList.add("hidden");
+      return;
+    }
+
+    preview.classList.remove("hidden", "invalid");
+    const imageUrl = safeImageUrl(rawUrl);
+    if (!imageUrl) {
+      preview.classList.add("invalid");
+      preview.textContent = "Gunakan link gambar HTTPS yang valid.";
+      return;
+    }
+
+    const image = document.createElement("img");
+    image.src = imageUrl;
+    image.alt = document.getElementById("new-q-image-alt")?.value.trim() || "Pratinjau gambar soal";
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => {
+      preview.classList.add("invalid");
+      preview.textContent = "Gambar tidak dapat dimuat. Periksa link atau izin akses gambarnya.";
+    }, { once: true });
+    preview.append(image);
   }
 
   async renderAnalyticsDashboard(forceFirestore = false) {
@@ -3314,14 +3416,28 @@ export class UIManager {
     if (state === GAME_STATES.MULTIPLAYER_HOST_LOBBY) {
       this.updateHostLobbyPlayersUI(room);
     } else if (state === GAME_STATES.MULTIPLAYER_HOST_GAME) {
-      this.updateHostGameProgressUI(room);
+      const readyNumber = document.getElementById("mp-ready-count");
+      if (room.status === ROOM_STATUS.COUNTDOWN) {
+        if (readyNumber) readyNumber.textContent = room.countdownSec || 1;
+        else this.renderMultiplayerHostGame(document.getElementById("msc-main"));
+      } else if (room.status === ROOM_STATUS.QUESTION && readyNumber) {
+        this.renderMultiplayerHostGame(document.getElementById("msc-main"));
+      } else {
+        this.updateHostGameProgressUI(room);
+      }
     } else if (state === GAME_STATES.MULTIPLAYER_PLAYER_LOBBY) {
       this.updatePlayerLobbyPeersUI(room);
       if (room.status === ROOM_STATUS.COUNTDOWN || room.status === ROOM_STATUS.QUESTION) {
         this.game.setState(GAME_STATES.MULTIPLAYER_PLAYER_GAME);
       }
     } else if (state === GAME_STATES.MULTIPLAYER_PLAYER_GAME) {
-      if (room.status === ROOM_STATUS.ROUND_RESULT) {
+      const readyNumber = document.getElementById("mp-ready-count");
+      if (room.status === ROOM_STATUS.COUNTDOWN) {
+        if (readyNumber) readyNumber.textContent = room.countdownSec || 1;
+        else this.renderMultiplayerPlayerGame(document.getElementById("msc-main"));
+      } else if (room.status === ROOM_STATUS.QUESTION && readyNumber) {
+        this.renderMultiplayerPlayerGame(document.getElementById("msc-main"));
+      } else if (room.status === ROOM_STATUS.ROUND_RESULT) {
         this.game.setState(GAME_STATES.MULTIPLAYER_ROUND_RESULT);
       } else if (room.status === ROOM_STATUS.PODIUM) {
         this.game.setState(GAME_STATES.MULTIPLAYER_PODIUM);
@@ -3500,12 +3616,14 @@ export class UIManager {
     const { cat, gr, count, time, qList } = initQuestions();
 
     // Create room
+    const readyCountdownSeconds = StorageManager.getSettings().readyCountdownSeconds;
     const room = await this.multiplayer.createRoom({
       hostName: "Guru",
       category: cat,
       grade: gr,
       totalQuestions: count,
       timeLimit: time,
+      readyCountdownSeconds,
       questions: qList
     });
 
@@ -3526,7 +3644,8 @@ export class UIManager {
         category: cat,
         grade: gr,
         totalQuestions: count,
-        timeLimit: time
+        timeLimit: time,
+        readyCountdownSeconds
       };
       this.multiplayer.currentRoom.questions = qList;
       this.multiplayer._syncRoomUpdate(this.multiplayer.currentRoom);
@@ -3758,9 +3877,36 @@ export class UIManager {
   }
 
   // 5. MULTIPLAYER HOST GAME SCREEN (BIG DISPLAY)
+  renderMultiplayerReadyScreen(container, room, audience = "student") {
+    const isHost = audience === "host";
+    container.innerHTML = `
+      <div class="screen-countdown multiplayer-ready-screen animate-scale-up">
+        <div class="movement-ready-card">
+          <span class="ready-eyebrow">${isHost ? "KELAS SEDANG BERSIAP" : "SIAPKAN GERAKANMU"}</span>
+          <div class="countdown-circle">
+            <div id="mp-ready-count" class="countdown-number">${Number(room.countdownSec) || 1}</div>
+          </div>
+          <h2>${isHost ? "Pastikan semua siswa siap" : "Ambil posisi di depan kamera"}</h2>
+          <p class="countdown-tag">Soal ${Number(room.currentQuestionIndex) + 1} segera dimulai.</p>
+          <div class="ready-step-grid">
+            <span>① Tubuh terlihat</span>
+            <span>② Ruang gerak aman</span>
+            <span>③ Fokus ke layar</span>
+          </div>
+          <span class="ready-room-label">Room ${escapeHTML(room.roomCode || "")}</span>
+        </div>
+      </div>
+    `;
+  }
+
   renderMultiplayerHostGame(container) {
     const room = this.multiplayer.currentRoom;
     if (!room) return;
+    if (room.status === ROOM_STATUS.COUNTDOWN) {
+      if (this._hostGameInterval) clearInterval(this._hostGameInterval);
+      this.renderMultiplayerReadyScreen(container, room, "host");
+      return;
+    }
 
     const currentQ = room.questions[room.currentQuestionIndex] || room.questions[0];
     const totalQ = room.questions.length;
@@ -3794,6 +3940,7 @@ export class UIManager {
 
         <!-- Question Presentation -->
         <div class="question-main-card" style="padding:28px 36px; margin: 14px 0;">
+          ${this.renderQuestionImage(currentQ, "question-media-host")}
           <h2 class="question-title-text" style="font-size:2.2rem;">${escapeHTML(currentQ.question)}</h2>
         </div>
 
@@ -3898,6 +4045,10 @@ export class UIManager {
   renderMultiplayerPlayerGame(container) {
     const room = this.multiplayer.currentRoom;
     if (!room) return;
+    if (room.status === ROOM_STATUS.COUNTDOWN) {
+      this.renderMultiplayerReadyScreen(container, room, "student");
+      return;
+    }
 
     const currentQ = room.questions[room.currentQuestionIndex] || room.questions[0];
     const totalQ = room.questions.length;
@@ -3918,6 +4069,7 @@ export class UIManager {
 
         <!-- Question Card -->
         <div class="question-main-card" style="padding:18px 20px; margin: 12px 0;">
+          ${this.renderQuestionImage(currentQ, "question-media-player")}
           <h3 class="question-title-text" style="font-size:1.35rem; line-height:1.3;">${escapeHTML(currentQ.question)}</h3>
         </div>
 

@@ -21,3 +21,17 @@ export function safeColor(value, fallback = "#64748B") {
   const color = String(value ?? "");
   return /^#[0-9A-Fa-f]{6}$/.test(color) ? color : fallback;
 }
+
+/** Accept only HTTPS image embeds (plus localhost HTTP during development). */
+export function safeImageUrl(value) {
+  const input = cleanText(value, 2048);
+  if (!input) return "";
+  try {
+    const url = new URL(input);
+    if (url.protocol === "https:") return url.href;
+    if (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)) return url.href;
+  } catch {
+    return "";
+  }
+  return "";
+}

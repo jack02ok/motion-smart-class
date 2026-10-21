@@ -1,4 +1,4 @@
-import { cleanText } from "../utils/security.js";
+import { cleanText, safeImageUrl } from "../utils/security.js";
 
 /**
  * MOTION SMART CLASS - Storage Manager
@@ -15,6 +15,7 @@ const ADVENTURE_KEY = "MSC_ADVENTURE_PROGRESS";
 const DEFAULT_SETTINGS = {
   soundEnabled: true,
   timerSeconds: 40,
+  readyCountdownSeconds: 5,
   confidenceThreshold: 0.60,
   cooldownSeconds: 1.2,
   holdDurationSeconds: 0.45,
@@ -75,6 +76,8 @@ export class StorageManager {
       const newQuestion = {
         ...question,
         id: question.id || "custom-" + Date.now(),
+        imageUrl: safeImageUrl(question.imageUrl),
+        imageAlt: cleanText(question.imageAlt || question.question, 160),
         timeLimit: parseInt(question.timeLimit, 10) || 40,
         pointWeight: parseInt(question.pointWeight, 10) || 100,
         createdAt: question.createdAt || new Date().toISOString(),
@@ -99,6 +102,8 @@ export class StorageManager {
         ...questions[index],
         ...updatedData,
         id, // preserve ID
+        imageUrl: safeImageUrl(updatedData.imageUrl ?? questions[index].imageUrl),
+        imageAlt: cleanText(updatedData.imageAlt ?? questions[index].imageAlt ?? updatedData.question ?? questions[index].question, 160),
         timeLimit: parseInt(updatedData.timeLimit, 10) || questions[index].timeLimit || 40,
         pointWeight: parseInt(updatedData.pointWeight, 10) || questions[index].pointWeight || 100,
         updatedAt: new Date().toISOString()
@@ -165,6 +170,8 @@ export class StorageManager {
           options,
           correctAnswer,
           explanation: cleanText(item.explanation, 2000),
+          imageUrl: safeImageUrl(item.imageUrl),
+          imageAlt: cleanText(item.imageAlt || item.question, 160),
           timeLimit: parseInt(item.timeLimit, 10) || 40,
           pointWeight: parseInt(item.pointWeight, 10) || 100,
           gestureMap: item.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },

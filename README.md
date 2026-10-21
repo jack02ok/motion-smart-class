@@ -40,9 +40,9 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 ### 5. Mode Guru (Teacher Mode)
 - Pada penggunaan lokal, PIN dibuat saat Mode Guru dibuka pertama kali dan disimpan hanya di browser perangkat tersebut.
 - Pada penggunaan Cloud Firestore, operasi cloud guru memerlukan Firebase Authentication dan profil role `teacher`; PIN lokal bukan pengganti autentikasi cloud.
-- **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, dan durasi *hold/cooldown*.
-- **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru (disimpan permanen di LocalStorage).
-- **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON.
+- **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
+- **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
+- **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
 - **Manajemen Skor Tim:** Atur nama dan skor awal tim kelas.
 
 ### 6. Fallback Mode (Touch Mode) & Privasi
@@ -126,3 +126,19 @@ npm run check
 Perangkat siswa masuk secara anonim dan UID Firebase digunakan sebagai identitas pemain. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban. Kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca akun guru.
 
 > Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. PIN lokal hanya mengunci tampilan pada satu browser dan bukan mekanisme otorisasi server.
+
+## 🖼️ Format gambar pada soal ekspor/impor
+
+Gunakan URL HTTPS publik yang langsung mengarah ke file gambar. Pastikan guru memiliki izin penggunaan gambarnya dan isi `imageAlt` agar materi tetap mudah dipahami siswa yang memakai pembaca layar.
+
+```json
+[
+  {
+    "question": "Perhatikan diagram. Pecahan berapa yang diarsir?",
+    "options": ["1/4", "1/2", "3/4", "1"],
+    "correctAnswer": 1,
+    "imageUrl": "https://contoh.sch.id/media/diagram-pecahan.png",
+    "imageAlt": "Lingkaran dengan setengah bagian berwarna biru"
+  }
+]
+```

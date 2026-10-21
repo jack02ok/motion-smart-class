@@ -15,7 +15,7 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
           'id', 'category', 'topic', 'grade', 'difficulty', 'passage',
           'question', 'options', 'correctAnswer', 'explanation', 'timeLimit',
-          'pointWeight', 'gestureMap', 'createdAt', 'updatedAt', 'source'
+          'pointWeight', 'gestureMap', 'imageUrl', 'imageAlt', 'createdAt', 'updatedAt', 'source'
         ])
         && request.resource.data.question is string
         && request.resource.data.question.size() > 0

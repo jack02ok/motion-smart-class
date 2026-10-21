@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 import { getDb, getCurrentUser, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
 import { StorageManager } from "./StorageManager.js";
+import { cleanText, safeImageUrl } from "../utils/security.js";
 
 const QUESTIONS_COLLECTION = "questions";
 const SESSIONS_COLLECTION = "game_sessions";
@@ -126,6 +127,8 @@ export class FirestoreManager {
       options: Array.isArray(question.options) ? question.options.map(String) : [],
       correctAnswer: typeof question.correctAnswer === "number" ? question.correctAnswer : 0,
       explanation: (question.explanation || "").trim(),
+      imageUrl: safeImageUrl(question.imageUrl),
+      imageAlt: cleanText(question.imageAlt || question.question, 160),
       timeLimit: parseInt(question.timeLimit, 10) || 40,
       pointWeight: parseInt(question.pointWeight, 10) || 100,
       gestureMap: question.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
@@ -165,6 +168,8 @@ export class FirestoreManager {
     const updatePayload = {
       ...updatedData,
       id,
+      imageUrl: safeImageUrl(updatedData.imageUrl),
+      imageAlt: cleanText(updatedData.imageAlt || updatedData.question, 160),
       updatedAt: new Date().toISOString()
     };
 

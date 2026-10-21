@@ -281,7 +281,8 @@ export class GameEngine {
 
   startCountdown() {
     this.setState(GAME_STATES.COUNTDOWN);
-    let count = 3;
+    const configuredSeconds = Number(this.storage.getSettings()?.readyCountdownSeconds);
+    let count = Math.min(10, Math.max(3, Number.isFinite(configuredSeconds) ? configuredSeconds : 5));
     this.audio.playCountdownTick();
 
     if (this.onStateChange) {

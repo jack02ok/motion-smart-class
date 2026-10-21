@@ -23,6 +23,7 @@ async function runTests() {
   // 1. Test StorageManager CRUD
   console.log("\n[1] Testing StorageManager (Tahap 2 Teacher Studio)...");
   const { StorageManager } = await import("../src/engine/StorageManager.js");
+  assert.strictEqual(StorageManager.getSettings().readyCountdownSeconds, 5, "Default movement preparation must be 5 seconds");
 
   // Save new question
   const q1 = StorageManager.saveCustomQuestion({
@@ -64,12 +65,17 @@ async function runTests() {
       options: ["Surabaya", "Bandung", "Jakarta / IKN", "Medan"],
       correctAnswer: 2,
       timeLimit: 30,
-      pointWeight: 100
+      pointWeight: 100,
+      imageUrl: "https://images.example.edu/indonesia-map.png",
+      imageAlt: "Peta Indonesia"
     }
   ];
   const importResult = StorageManager.importCustomQuestions(validImportData);
   assert.strictEqual(importResult.success, true);
   assert.strictEqual(importResult.importedCount, 1);
+  const importedQuestion = StorageManager.getCustomQuestions().find((question) => question.topic === "Wawasan Nusantara");
+  assert.strictEqual(importedQuestion.imageUrl, "https://images.example.edu/indonesia-map.png");
+  assert.strictEqual(importedQuestion.imageAlt, "Peta Indonesia");
   console.log("✓ importCustomQuestions (Valid JSON): PASS");
 
   // Import Invalid JSON
@@ -84,10 +90,12 @@ async function runTests() {
   assert.ok(!remaining.some((q) => q.id === q1.id), "Deleted question should not exist");
   console.log("✓ deleteCustomQuestion: PASS");
 
-  const { escapeHTML, cleanText, safeColor } = await import("../src/utils/security.js");
+  const { escapeHTML, cleanText, safeColor, safeImageUrl } = await import("../src/utils/security.js");
   assert.strictEqual(escapeHTML('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
   assert.strictEqual(cleanText("Nama\u0000 Siswa", 20), "Nama Siswa");
   assert.strictEqual(safeColor("red; background:url(x)"), "#64748B");
+  assert.strictEqual(safeImageUrl("javascript:alert(1)"), "");
+  assert.strictEqual(safeImageUrl("https://cdn.example.edu/question.png"), "https://cdn.example.edu/question.png");
   console.log("✓ HTML escaping & input hardening: PASS");
 
   const firestoreRules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
@@ -424,6 +432,8 @@ async function runTests() {
       question: "25 + 75 = ?",
       options: ["90", "100", "110", "120"],
       correctAnswer: 1, // 'B'
+      imageUrl: "https://images.example.edu/number-blocks.png",
+      imageAlt: "Balok angka 25 dan 75",
       timeLimit: 30
     },
     {
@@ -448,6 +458,9 @@ async function runTests() {
   assert.strictEqual(room.status, ROOM_STATUS.LOBBY);
   assert.strictEqual(room.questions.length, 2);
   assert.strictEqual(room.questions[0].correctAnswer, undefined, "Answer key must not be exposed in public room data");
+  assert.strictEqual(room.questions[0].imageUrl, "https://images.example.edu/number-blocks.png", "Question image must be available to players");
+  assert.strictEqual(room.settings.readyCountdownSeconds, 5, "Multiplayer must default to a 5-second preparation");
+  assert.strictEqual(room.countdownSec, 5);
   assert.strictEqual(hostEngine.hostQuestions[0].correctAnswer, 1, "Host keeps the protected answer key");
   assert.strictEqual(hostEngine.isHost, true);
   console.log("✓ hostEngine.createRoom: PASS");

@@ -164,6 +164,7 @@ export class MultiplayerEngine {
     difficulty = "medium",
     totalQuestions = 5,
     timeLimit = 30,
+    readyCountdownSeconds = 5,
     questions = []
   } = {}) {
     const cloudUser = await this._ensureCloudIdentity().catch(() => null);
@@ -173,6 +174,7 @@ export class MultiplayerEngine {
     this.hostQuestions = questions.slice(0, totalQuestions).map((question) => ({ ...question }));
     const publicQuestions = this.hostQuestions.map(({ correctAnswer, explanation, ...question }) => question);
 
+    const readySeconds = Math.min(10, Math.max(3, Number(readyCountdownSeconds) || 5));
     const newRoom = {
       roomCode: this.roomCode,
       hostId: this.localPlayerId,
@@ -185,12 +187,13 @@ export class MultiplayerEngine {
         grade,
         difficulty,
         totalQuestions,
-        timeLimit
+        timeLimit,
+        readyCountdownSeconds: readySeconds
       },
       questions: publicQuestions,
       currentQuestionIndex: 0,
       questionStartedAt: 0,
-      countdownSec: 3,
+      countdownSec: readySeconds,
       players: {},
       leaderboard: []
     };
@@ -233,7 +236,8 @@ export class MultiplayerEngine {
     if (!this.isHost || !this.currentRoom) return;
 
     this.currentRoom.status = ROOM_STATUS.COUNTDOWN;
-    this.currentRoom.countdownSec = 3;
+    const readySeconds = Math.min(10, Math.max(3, Number(this.currentRoom.settings?.readyCountdownSeconds) || 5));
+    this.currentRoom.countdownSec = readySeconds;
     this.currentRoom.currentQuestionIndex = 0;
     this.currentRoom.questionStartedAt = Date.now();
 
@@ -242,7 +246,7 @@ export class MultiplayerEngine {
     await this._syncRoomUpdate(this.currentRoom);
 
     // Trigger Countdown then transition to QUESTION
-    let count = 3;
+    let count = readySeconds;
     const interval = setInterval(async () => {
       count--;
       if (count > 0) {
@@ -291,11 +295,12 @@ export class MultiplayerEngine {
 
     this.currentRoom.currentQuestionIndex = nextIndex;
     this.currentRoom.status = ROOM_STATUS.COUNTDOWN;
-    this.currentRoom.countdownSec = 3;
+    const readySeconds = Math.min(10, Math.max(3, Number(this.currentRoom.settings?.readyCountdownSeconds) || 5));
+    this.currentRoom.countdownSec = readySeconds;
     this._resetPlayerAnswersForNewRound();
     await this._syncRoomUpdate(this.currentRoom);
 
-    let count = 3;
+    let count = readySeconds;
     const interval = setInterval(async () => {
       count--;
       if (count > 0) {
