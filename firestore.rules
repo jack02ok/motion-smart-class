@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // BANK SOAL (QUESTIONS)
+    // ==========================================
+    match /questions/{questionId} {
+      // Izinkan baca untuk seluruh perangkat siswa / display kelas
+      allow read: if true;
+
+      // Validasi penulisan soal (harus memiliki teks pertanyaan dan minimal 2 opsi)
+      allow write: if request.resource.data.question is string
+                   && request.resource.data.options is list
+                   && request.resource.data.options.size() >= 2;
+    }
+
+    // ==========================================
+    // RIWAYAT PERMAINAN (GAME SESSIONS)
+    // ==========================================
+    match /game_sessions/{sessionId} {
+      // Izinkan baca riwayat sesi untuk analisis kelas di Teacher Studio
+      allow read: if true;
+
+      // Validasi penulisan sesi: Pastikan metrik numerik valid dan TIDAK ADA data biometrik/video
+      allow write: if request.resource.data.score is number
+                   && request.resource.data.accuracy is number
+                   && !('videoStream' in request.resource.data)
+                   && !('landmarks' in request.resource.data)
+                   && !('faceBiometrics' in request.resource.data)
+                   && !('cameraFrame' in request.resource.data);
+    }
+
+    // ==========================================
+    // MULTIPLAYER ROOMS (GAME SHOW KELAS)
+    // ==========================================
+    match /msc_rooms/{roomCode} {
+      allow read: if true;
+      allow write: if !('videoStream' in request.resource.data)
+                   && !('landmarks' in request.resource.data)
+                   && !('faceBiometrics' in request.resource.data)
+                   && !('cameraFrame' in request.resource.data);
+    }
+  }
+}

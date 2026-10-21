@@ -1,0 +1,105 @@
+# MOTION SMART CLASS 🧠🕺
+> **“Berpikir dengan Otak. Menjawab dengan Gerak!”**
+
+Aplikasi web edukatif interaktif literasi dan numerasi siswa SD menggunakan deteksi kamera dan gerakan tubuh real-time. Dirancang khusus untuk **Interactive Digital Board (PID)**, tablet Android, laptop, dan PC dengan webcam.
+
+---
+
+## 🚀 Fitur Utama
+
+### 1. Sistem Deteksi Gerakan Tubuh (Gesture Engine)
+- **Gesture A (Pilihan A):** Tangan kiri diangkat di atas bahu
+- **Gesture B (Pilihan B):** Tangan kanan diangkat di atas bahu
+- **Gesture C (Pilihan C):** Kedua tangan diangkat di atas bahu
+- **Gesture D (Pilihan D):** Posisi jongkok (squat)
+- **Gesture SKIP:** Kedua tangan direntangkan ke samping secara horizontal
+- **Gesture READY:** Berdiri tegak di tengah area kamera
+- **Gesture BONUS:** Kedua tangan diangkat tinggi di atas kepala
+- **Visual Feedback:** Tampilan status deteksi gerakan real-time, lingkaran meter konfirmasi tahan gerakan (*hold confirmation meter*), dan jeda *cooldown* untuk mencegah pemicu ganda.
+
+### 2. Kalibrasi Kamera (Camera Check)
+Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
+- ✓ Kepala terdeteksi
+- ✓ Bahu terdeteksi
+- ✓ Tangan terdeteksi
+- ✓ Tubuh terdeteksi
+- ✓ Posisi ideal (area berdiri tengah)
+
+### 3. 6 Mode Permainan
+1. **Numerasi & Quick Quiz:** Soal pilihan ganda berhitung cepat dengan batas waktu (30–60 detik).
+2. **Literasi (Detektif Membaca):** Soal berbasis teks cerita dengan petunjuk investigasi (*Clue Found*).
+3. **Benar atau Salah (True/False):** 🙆 Angkat tangan untuk Benar, 🙅 Silang tangan/jongkok untuk Salah.
+4. **Duel Tim:** Pertarungan 1-on-1 antar tim kelas (Tim Merah vs Tim Biru). Jawaban benar & tercepat mendapatkan bonus poin.
+5. **Boss Challenge:** Lawan *Raja Angka Raksasa* dengan bar HP! Jawaban benar menghasilkan serangan damage langsung.
+6. **Motion Challenge:** Tantangan variasi gerakan dinamis.
+
+### 4. Papan Skor Kelas (Team Mode)
+- Mendukung 4 Tim: 🔴 Tim Merah, 🔵 Tim Biru, 🟢 Tim Hijau, 🟡 Tim Kuning.
+- Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
+
+### 5. Mode Guru (Teacher Mode - PIN: `1234`)
+- **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, dan durasi *hold/cooldown*.
+- **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru (disimpan permanen di LocalStorage).
+- **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON.
+- **Manajemen Skor Tim:** Atur nama dan skor awal tim kelas.
+
+### 6. Fallback Mode (Touch Mode) & Privasi
+- **Privasi Terjamin:** Video kamera diproses 100% secara lokal di browser via MediaPipe/Canvas. Tidak ada wajah, foto, atau video yang disimpan maupun diunggah.
+- **Touch Mode Fallback:** Jika perangkat tidak memiliki kamera atau izin ditolak, siswa tetap dapat bermain secara lancar dengan menekan kartu pilihan di layar sentuh / mouse.
+
+---
+
+## 🛠️ Arsitektur Kode Modular
+
+Proyek dirancang dengan arsitektur bersih dan modular:
+```
+motion-smart-class/
+├── index.html                  # Entry HTML + Google Fonts (Outfit & Inter)
+├── package.json                # Dependensi Vite & canvas-confetti
+├── vite.config.js
+├── src/
+│   ├── main.js                 # Orchestrator aplikasi utama
+│   ├── style.css               # Desain modern game show, responsive & PID
+│   ├── data/
+│   │   └── defaultQuestions.js # Bank soal 50+ Numerasi & Literasi SD Kelas 1-6
+│   └── engine/
+│       ├── AudioManager.js     # Web Audio API Synthesizer (100% offline)
+│       ├── StorageManager.js   # LocalStorage untuk soal guru, pengaturan & tim
+│       ├── QuestionEngine.js   # Pemfilteran & pengacakan soal kurikulum SD
+│       ├── ScoreEngine.js      # Perhitungan skor, combo x2–x5, streak & badges
+│       ├── CameraManager.js    # Akses Web Camera API, status pill, flip kamera
+│       ├── PoseDetector.js     # MediaPipe Pose & overlay rangka sendi tubuh
+│       ├── GestureEngine.js    # Klasifikasi postur tubuh, debouncing & hold meter
+│       ├── GameEngine.js       # State machine permainan & countdown
+│       ├── MultiplayerEngine.js# Cloud Firestore & BroadcastChannel Realtime Rooms
+│       └── UIManager.js        # Antarmuka layar, HUD, modal PIN, podium & konfeti
+```
+
+### 7. Multiplayer Online Real-Time (Game Show Kelas) 🌐
+- **Host Screen (Papan Interaktif / PID Guru):**
+  - Guru membuka Room dengan kode PIN 6 karakter acak (misal: `MSC-8492`).
+  - Menampilkan soal berukuran besar di depan kelas, status respons siswa live, dan grafik sebaran jawaban.
+- **Player Screen (HP / Tablet Siswa):**
+  - Siswa bergabung dari meja masing-masing dengan memasukkan PIN dan memilih avatar hewan lucu.
+  - Kamera di perangkat masing-masing mendeteksi pose jawaban siswa secara lokal tanpa mengirim video ke internet (100% aman privasi).
+- **Dual Real-time Sync:**
+  - Terhubung via Cloud Firestore `onSnapshot` untuk multiplayer antar perangkat di seluruh internet.
+  - Dilengkapi jembatan `BroadcastChannel` untuk pengujian multi-tab tanpa jeda di perangkat yang sama.
+- **Live Leaderboard & Podium Juara:** Papan skor otomatis terupdate setiap ronde dan selebrasi podium juara 1, 2, 3 dengan hujan konfeti!
+
+---
+
+## 💻 Cara Menjalankan
+
+### 1. Jalankan Dev Server
+```bash
+cd motion-smart-class
+npm run dev
+```
+Buka browser di: `http://localhost:5173/`
+
+### 2. Build untuk Produksi
+```bash
+npm run build
+npm run preview
+```
