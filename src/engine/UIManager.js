@@ -4,6 +4,7 @@
  */
 
 import confetti from "canvas-confetti";
+import { escapeHTML, safeColor } from "../utils/security.js";
 import { GAME_STATES, GAME_MODES, ADVENTURE_STAGES } from "./GameEngine.js";
 import { GESTURE_TYPES, GESTURE_LABELS } from "./GestureEngine.js";
 import { CAMERA_STATUS } from "./CameraManager.js";
@@ -14,10 +15,15 @@ import {
   saveFirebaseConfig,
   resetFirebaseConfig,
   testFirestoreConnection,
-  isFirebaseConfigured
+  isFirebaseConfigured,
+  ensureAnonymousAuth,
+  getTeacherAuthStatus,
+  signInTeacher,
+  signOutFirebaseUser
 } from "../firebase.js";
 import { DEFAULT_QUESTIONS } from "../data/defaultQuestions.js";
 import { MultiplayerEngine, ROOM_STATUS } from "./MultiplayerEngine.js";
+import firestoreRules from "../../firestore.rules?raw";
 
 export class UIManager {
   constructor({ appContainer, gameEngine, cameraManager, poseDetector, gestureEngine, audioManager }) {
@@ -80,7 +86,7 @@ export class UIManager {
             </button>
 
             <!-- Teacher Mode Button -->
-            <button id="btn-teacher-open" class="hud-btn teacher-btn" title="Mode Guru (PIN: 1234)">
+            <button id="btn-teacher-open" class="hud-btn teacher-btn" title="Buka Mode Guru">
               <span class="hud-icon">👨‍🏫</span>
               <span>Guru</span>
             </button>
@@ -88,7 +94,7 @@ export class UIManager {
         </header>
 
         <!-- MAIN SCREEN CONTAINER -->
-        <main id="msc-main" class="msc-main">
+        <main id="msc-main" class="msc-main" tabindex="-1">
           <!-- Screens dynamically injected here -->
         </main>
 
@@ -144,20 +150,20 @@ export class UIManager {
         </div>
 
         <!-- TEACHER STUDIO & CLASS MANAGEMENT MODAL -->
-        <div id="teacher-modal" class="modal-backdrop hidden">
+        <div id="teacher-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="teacher-modal-title">
           <div class="modal-card">
             <div class="modal-header">
-              <h2>👨‍🏫 TEACHER STUDIO & PENGATURAN KELAS</h2>
-              <button id="btn-teacher-close" class="modal-close-btn">&times;</button>
+              <h2 id="teacher-modal-title">👨‍🏫 TEACHER STUDIO & PENGATURAN KELAS</h2>
+              <button id="btn-teacher-close" class="modal-close-btn" aria-label="Tutup Mode Guru">&times;</button>
             </div>
 
             <div id="teacher-pin-section" class="teacher-pin-section">
               <p>Masukkan PIN Guru untuk mengakses bank soal, editor, analitik, dan pengaturan:</p>
               <div class="pin-input-group">
-                <input type="password" id="teacher-pin-input" maxlength="6" placeholder="PIN (Default: 1234)" autofocus />
+                <input type="password" id="teacher-pin-input" maxlength="12" placeholder="PIN Guru" autocomplete="current-password" autofocus />
                 <button id="btn-teacher-login" class="primary-btn">Masuk Studio</button>
               </div>
-              <p id="pin-error-msg" class="error-text hidden">PIN salah. Gunakan PIN 1234.</p>
+              <p id="pin-error-msg" class="error-text hidden" role="alert">PIN guru tidak cocok.</p>
             </div>
 
             <div id="teacher-dashboard-section" class="teacher-dashboard-section hidden">
@@ -413,7 +419,7 @@ export class UIManager {
                   </div>
                   <div class="form-group">
                     <label>PIN Guru:</label>
-                    <input type="text" id="setting-pin" maxlength="6" value="1234" />
+                    <input type="password" id="setting-pin" minlength="4" maxlength="12" autocomplete="new-password" />
                   </div>
                 </div>
                 <button id="btn-save-settings" class="primary-btn mt-4">Simpan Pengaturan Kelas</button>
@@ -504,6 +510,28 @@ export class UIManager {
                     </form>
 
                     <div id="firebase-test-feedback" class="fb-feedback-box hidden"></div>
+                  </div>
+
+                  <div class="firebase-config-box">
+                    <h4>🔐 Autentikasi Guru untuk Cloud</h4>
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:12px;">
+                      Gunakan akun Firebase Authentication yang profil <code>users/{uid}</code>-nya memiliki role <code>teacher</code>.
+                    </p>
+                    <div class="firebase-form-grid">
+                      <div class="form-group">
+                        <label>Email Guru:</label>
+                        <input type="email" id="fb-teacher-email" autocomplete="username" />
+                      </div>
+                      <div class="form-group">
+                        <label>Password:</label>
+                        <input type="password" id="fb-teacher-password" autocomplete="current-password" />
+                      </div>
+                      <div class="fb-form-actions">
+                        <button type="button" id="btn-fb-teacher-login" class="primary-btn">Masuk sebagai Guru</button>
+                        <button type="button" id="btn-fb-teacher-logout" class="secondary-btn">Keluar</button>
+                      </div>
+                    </div>
+                    <div id="fb-teacher-auth-feedback" class="fb-feedback-box"></div>
                   </div>
 
                   <!-- Cloud Operations Box -->
@@ -755,18 +783,18 @@ export class UIManager {
           if (result.success) {
             this.audio.playCorrect();
             feedbackBox.classList.add("success");
-            feedbackBox.innerHTML = `✅ <strong>Impor Berhasil:</strong> ${result.importedCount} soal baru berhasil ditambahkan! (Total: ${result.totalCount} soal)`;
+            feedbackBox.textContent = `✅ Impor Berhasil: ${result.importedCount} soal baru berhasil ditambahkan! (Total: ${result.totalCount} soal)`;
             this.renderCustomQuestionsList();
           } else {
             this.audio.playWrong();
             feedbackBox.classList.add("error");
-            feedbackBox.innerHTML = `⚠️ <strong>Impor Gagal:</strong> ${result.error}`;
+            feedbackBox.textContent = `⚠️ Impor Gagal: ${result.error}`;
           }
         } catch (err) {
           this.audio.playWrong();
           feedbackBox.classList.remove("hidden", "success");
           feedbackBox.classList.add("error");
-          feedbackBox.innerHTML = `⚠️ <strong>File Rusak:</strong> Format JSON tidak valid (${err.message}).`;
+          feedbackBox.textContent = `⚠️ File Rusak: Format JSON tidak valid (${err.message}).`;
         }
         // Reset file input
         importInput.value = "";
@@ -1007,6 +1035,8 @@ export class UIManager {
       camPip.classList.add("hidden");
       camPip.classList.remove("calibration-view");
       guideBox.classList.add("hidden");
+      this.pose.stopDetection();
+      this.camera.stopCamera();
     }
 
     switch (state) {
@@ -1065,6 +1095,7 @@ export class UIManager {
         this.renderMultiplayerPodium(main);
         break;
     }
+    queueMicrotask(() => main?.focus({ preventScroll: true }));
   }
 
   async startCameraSession() {
@@ -1373,11 +1404,11 @@ export class UIManager {
       return activeTeams
         .map(
           (t, idx) => `
-        <div class="team-setup-card team-${t.id}" style="border-top: 6px solid ${t.color};">
-          <div class="team-setup-icon" style="background:${t.color}20; color:${t.color};">
+        <div class="team-setup-card team-${escapeHTML(t.id)}" style="border-top: 6px solid ${safeColor(t.color)};">
+          <div class="team-setup-icon" style="color:${safeColor(t.color)};">
             ${idx === 0 ? "🔴" : idx === 1 ? "🔵" : idx === 2 ? "🟢" : "🟡"}
           </div>
-          <h4>${t.name}</h4>
+          <h4>${escapeHTML(t.name)}</h4>
           <span class="team-member-pill">${t.members || 5} Siswa</span>
           <p class="team-ready-label">✓ Siap Bertanding</p>
         </div>
@@ -1984,7 +2015,7 @@ export class UIManager {
           <div class="team-turn-banner ${activeTeam.id}">
             <div style="display:flex; align-items:center; gap: 10px;">
               <span class="team-badge-pill ${activeTeam.id}">
-                🎯 GILIRAN: ${activeTeam.name.toUpperCase()}
+                🎯 GILIRAN: ${escapeHTML(activeTeam.name).toUpperCase()}
               </span>
               <span style="font-size:0.85rem; font-weight:700;">(1 Siswa Maju ke Depan Kamera!)</span>
             </div>
@@ -1996,8 +2027,8 @@ export class UIManager {
             ${battleTeams
               .map(
                 (t, idx) => `
-              <div class="hud-pill ${t.id} ${idx === currentTeamTurn % battleTeams.length ? "active-turn-pill" : ""}" style="border: 2px solid ${t.color};">
-                ${t.name}: <strong>${t.sessionScore || 0} PTS</strong>
+              <div class="hud-pill ${escapeHTML(t.id)} ${idx === currentTeamTurn % battleTeams.length ? "active-turn-pill" : ""}" style="border: 2px solid ${safeColor(t.color)};">
+                ${escapeHTML(t.name)}: <strong>${Number(t.sessionScore) || 0} PTS</strong>
               </div>
             `
               )
@@ -2011,7 +2042,7 @@ export class UIManager {
         <div class="game-hud-bar">
           <div class="hud-left">
             <span class="hud-pill hud-q-num">Soal ${index} / ${total}</span>
-            <span class="hud-pill hud-topic">${question.topic || "Edukasi Gerak"}</span>
+            <span class="hud-pill hud-topic">${escapeHTML(question.topic || "Edukasi Gerak")}</span>
             ${
               isAdventure
                 ? `<span class="hud-pill" style="background:#FEF3C7; color:#92400E; font-weight:800;">🗺️ Misi ${adventureStage || 1} | 🗝️ ${adventureKeys || 0}/3 Kunci</span>`
@@ -2049,8 +2080,8 @@ export class UIManager {
             <div class="boss-avatar-box">
               <span class="boss-emoji">👑👹</span>
               <div class="boss-info">
-                <h3>${question.bossName || "Raja Angka Raksasa"}</h3>
-                <span class="boss-title">${question.bossTitle || "Penguasa Labirin Numerasi"}</span>
+                <h3>${escapeHTML(question.bossName || "Raja Angka Raksasa")}</h3>
+                <span class="boss-title">${escapeHTML(question.bossTitle || "Penguasa Labirin Numerasi")}</span>
               </div>
             </div>
             <div class="boss-hp-track">
@@ -2070,7 +2101,7 @@ export class UIManager {
             <div class="detective-header">
               <span class="det-icon">🔎 BUKTI BACAAN DETEKTIF</span>
             </div>
-            <p class="det-passage-text">"${question.passage}"</p>
+            <p class="det-passage-text">"${escapeHTML(question.passage)}"</p>
           </div>
         `
             : ""
@@ -2078,7 +2109,7 @@ export class UIManager {
 
         <!-- MAIN QUESTION CARD -->
         <div class="question-main-card">
-          <h2 class="question-title-text">${question.question}</h2>
+          <h2 class="question-title-text">${escapeHTML(question.question)}</h2>
         </div>
 
         <!-- MOTION ARENA: ACTIVE PLAYER CALIBRATION INDICATOR (Tahap 3) -->
@@ -2110,7 +2141,7 @@ export class UIManager {
                     <span class="arena-zone-badge">ZONA ${letter}</span>
                     <span class="arena-zone-gesture">${reachHint}</span>
                   </div>
-                  <div class="arena-zone-text">${optText}</div>
+                  <div class="arena-zone-text">${escapeHTML(optText)}</div>
                 </div>
               `;
               })
@@ -2149,7 +2180,7 @@ export class UIManager {
                     <div class="opt-gesture-badge">${gestureLabel}</div>
                     <div class="opt-body">
                       <span class="opt-label-letter">${letter}</span>
-                      <span class="opt-text">${optText}</span>
+                      <span class="opt-text">${escapeHTML(optText)}</span>
                     </div>
                   </div>
                 `;
@@ -2348,11 +2379,11 @@ export class UIManager {
                 ${rankedTeams
                   .map(
                     (t, idx) => `
-                  <div class="team-podium-card rank-${idx + 1}" style="border-top: 6px solid ${t.color};">
+                  <div class="team-podium-card rank-${idx + 1}" style="border-top: 6px solid ${safeColor(t.color)};">
                     <div class="podium-rank-badge">
                       ${idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : "🎖️"}
                     </div>
-                    <h4>${t.name}</h4>
+                    <h4>${escapeHTML(t.name)}</h4>
                     <div class="podium-team-score">+${t.sessionScore || 0} PTS</div>
                     <span style="font-size: 0.78rem; color: var(--text-muted);">Sesi Ini</span>
                   </div>
@@ -2536,8 +2567,19 @@ export class UIManager {
   handleTeacherLogin() {
     const pin = document.getElementById("teacher-pin-input").value.trim();
     const settings = StorageManager.getSettings();
+    const error = document.getElementById("pin-error-msg");
 
-    if (pin === settings.teacherPin || pin === "1234") {
+    if (!settings.teacherPin) {
+      if (pin.length < 4) {
+        error.textContent = "Buat PIN guru baru dengan minimal 4 karakter.";
+        error.classList.remove("hidden");
+        return;
+      }
+      StorageManager.saveSettings({ teacherPin: pin });
+      settings.teacherPin = pin;
+    }
+
+    if (pin === settings.teacherPin) {
       this.audio.playCorrect();
       document.getElementById("teacher-pin-section").classList.add("hidden");
       document.getElementById("teacher-dashboard-section").classList.remove("hidden");
@@ -2546,7 +2588,8 @@ export class UIManager {
       this.renderTeamsEditor();
     } else {
       this.audio.playWrong();
-      document.getElementById("pin-error-msg").classList.remove("hidden");
+      error.textContent = "PIN guru tidak cocok.";
+      error.classList.remove("hidden");
     }
   }
 
@@ -2610,36 +2653,36 @@ export class UIManager {
       ${questions
         .map(
           (q) => `
-        <div class="custom-q-item" id="q-item-${q.id}">
+        <div class="custom-q-item" id="q-item-${escapeHTML(q.id)}">
           <div class="q-item-header">
             <div style="display:flex; gap: 8px; align-items:center; flex-wrap:wrap;">
-              <span class="q-badge-cat">${q.category.toUpperCase()} - Kelas ${q.grade || 4} (${q.difficulty || "medium"})</span>
+              <span class="q-badge-cat">${escapeHTML(q.category).toUpperCase()} - Kelas ${Number(q.grade) || 4} (${escapeHTML(q.difficulty || "medium")})</span>
               <span class="cloud-source-badge ${q.source === 'firestore' || q.source === 'seed' ? 'badge-firestore' : 'badge-local'}">
                 ${q.source === 'firestore' || q.source === 'seed' ? '☁️ Cloud Firestore' : '💾 Lokal'}
               </span>
               <span style="font-size: 0.75rem; background: #E2E8F0; padding: 2px 8px; border-radius: 4px; font-weight:700;">⏱️ ${q.timeLimit || 40}s</span>
               <span style="font-size: 0.75rem; background: #FEF3C7; color: #92400E; padding: 2px 8px; border-radius: 4px; font-weight:700;">⭐ ${q.pointWeight || 100} pts</span>
-              <span style="font-size: 0.78rem; font-weight: 800; color: var(--text-secondary);">${q.topic || "Materi"}</span>
+              <span style="font-size: 0.78rem; font-weight: 800; color: var(--text-secondary);">${escapeHTML(q.topic || "Materi")}</span>
             </div>
             <div style="display:flex; gap: 6px;">
-              <button class="edit-q-btn" data-id="${q.id}">✏️ Edit</button>
-              <button class="delete-q-btn" data-id="${q.id}">🗑️ Hapus</button>
+              <button class="edit-q-btn" data-id="${escapeHTML(q.id)}">✏️ Edit</button>
+              <button class="delete-q-btn" data-id="${escapeHTML(q.id)}">🗑️ Hapus</button>
             </div>
           </div>
-          ${q.passage ? `<p style="font-size: 0.85rem; color: #78350F; background: #FFFBEB; padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-style: italic;">"${q.passage}"</p>` : ""}
-          <p class="q-item-text" style="margin-top: 6px;"><strong>${q.question}</strong></p>
+          ${q.passage ? `<p style="font-size: 0.85rem; color: #78350F; background: #FFFBEB; padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-style: italic;">"${escapeHTML(q.passage)}"</p>` : ""}
+          <p class="q-item-text" style="margin-top: 6px;"><strong>${escapeHTML(q.question)}</strong></p>
           <div class="q-item-opts" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px;">
             ${q.options
               .map(
                 (opt, idx) => `
               <div style="padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border); background: ${idx === q.correctAnswer ? "rgba(34, 197, 94, 0.15)" : "#FFFFFF"}; border-color: ${idx === q.correctAnswer ? "#22C55E" : "var(--border)"}; font-size: 0.82rem;">
-                <strong>${["A", "B", "C", "D"][idx]}:</strong> ${opt} ${idx === q.correctAnswer ? "✓ (Kunci)" : ""}
+                <strong>${["A", "B", "C", "D"][idx]}:</strong> ${escapeHTML(opt)} ${idx === q.correctAnswer ? "✓ (Kunci)" : ""}
               </div>
             `
               )
               .join("")}
           </div>
-          ${q.explanation ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px;">💡 <em>Pembahasan: ${q.explanation}</em></div>` : ""}
+          ${q.explanation ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px;">💡 <em>Pembahasan: ${escapeHTML(q.explanation)}</em></div>` : ""}
         </div>
       `
         )
@@ -2656,13 +2699,16 @@ export class UIManager {
 
     // Bind Delete buttons with confirmation
     container.querySelectorAll(".delete-q-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const id = btn.getAttribute("data-id");
         if (confirm("Apakah Anda yakin ingin menghapus soal ini dari Bank Soal?")) {
           this.audio.playClick();
-          StorageManager.deleteCustomQuestion(id);
-          FirestoreManager.deleteQuestion(id).catch(() => {});
-          this.syncQuestionsFromFirestore(false);
+          const deleted = await FirestoreManager.deleteQuestion(id);
+          if (!deleted) {
+            alert("Soal tidak dapat dihapus dari cloud. Pastikan Anda sudah login sebagai guru.");
+            return;
+          }
+          await this.syncQuestionsFromFirestore(false);
           this.applyQuestionFilters();
         }
       });
@@ -2866,7 +2912,7 @@ export class UIManager {
         <div class="custom-q-item" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap: 8px;">
           <div>
             <div style="display:flex; gap: 6px; align-items:center; flex-wrap:wrap;">
-              <span class="q-badge-cat">${(s.mode || "QUIZ").toUpperCase()} - Kelas ${s.grade || 4} (${s.category || "campuran"})</span>
+              <span class="q-badge-cat">${escapeHTML(s.mode || "QUIZ").toUpperCase()} - Kelas ${escapeHTML(s.grade || 4)} (${escapeHTML(s.category || "campuran")})</span>
               <span class="cloud-source-badge ${s.source === 'firestore' || s.source === 'app' ? 'badge-firestore' : 'badge-local'}">
                 ${s.source === 'firestore' || s.source === 'app' ? '☁️ Cloud Firestore' : '💾 Lokal'}
               </span>
@@ -2895,15 +2941,15 @@ export class UIManager {
     container.innerHTML = teams
       .map(
         (t) => `
-      <div class="team-edit-card" style="border-top: 5px solid ${t.color}">
-        <h4>${t.name}</h4>
+      <div class="team-edit-card" style="border-top: 5px solid ${safeColor(t.color)}">
+        <h4>${escapeHTML(t.name)}</h4>
         <div class="form-group">
           <label>Nama Tim:</label>
-          <input type="text" id="team-name-${t.id}" value="${t.name}" />
+          <input type="text" id="team-name-${escapeHTML(t.id)}" value="${escapeHTML(t.name)}" />
         </div>
         <div class="form-group">
           <label>Skor Saat Ini:</label>
-          <input type="number" id="team-score-${t.id}" value="${t.score}" />
+          <input type="number" id="team-score-${escapeHTML(t.id)}" value="${Number(t.score) || 0}" />
         </div>
       </div>
     `
@@ -2984,6 +3030,46 @@ export class UIManager {
         });
       });
     }
+
+    document.getElementById("btn-fb-teacher-login")?.addEventListener("click", () => {
+      this.loginFirebaseTeacherUI();
+    });
+    document.getElementById("btn-fb-teacher-logout")?.addEventListener("click", async () => {
+      await signOutFirebaseUser();
+      await ensureAnonymousAuth().catch(() => null);
+      await this.updateTeacherAuthUI();
+    });
+  }
+
+  async loginFirebaseTeacherUI() {
+    const feedback = document.getElementById("fb-teacher-auth-feedback");
+    const email = document.getElementById("fb-teacher-email")?.value.trim();
+    const password = document.getElementById("fb-teacher-password")?.value || "";
+    if (!feedback || !email || !password) {
+      if (feedback) feedback.textContent = "Isi email dan password guru.";
+      return;
+    }
+    feedback.textContent = "Memverifikasi akun guru...";
+    try {
+      await signInTeacher(email, password);
+      document.getElementById("fb-teacher-password").value = "";
+      await this.updateTeacherAuthUI();
+    } catch (error) {
+      feedback.textContent = `❌ ${error.message || "Autentikasi gagal."}`;
+    }
+  }
+
+  async updateTeacherAuthUI() {
+    const feedback = document.getElementById("fb-teacher-auth-feedback");
+    if (!feedback) return;
+    const status = await getTeacherAuthStatus();
+    if (status.isTeacher) {
+      feedback.textContent = `✅ Terautentikasi sebagai guru: ${status.user.email}`;
+    } else if (status.user?.isAnonymous) {
+      feedback.textContent = "ℹ️ Perangkat masuk sebagai siswa anonim. Login guru diperlukan untuk menulis data cloud.";
+    } else {
+      feedback.textContent = "Belum masuk sebagai guru.";
+    }
   }
 
   updateFirestoreStatusUI() {
@@ -3046,6 +3132,7 @@ export class UIManager {
 
   async renderFirebasePanel() {
     this.updateFirestoreStatusUI();
+    this.updateTeacherAuthUI().catch(() => {});
 
     const countQuestionsEl = document.getElementById("fb-stat-questions-count");
     const countSessionsEl = document.getElementById("fb-stat-sessions-count");
@@ -3208,26 +3295,7 @@ export class UIManager {
   }
 
   copyFirestoreRulesUI() {
-    const rulesText = `rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /questions/{questionId} {
-      allow read: if true;
-      allow write: if request.resource.data.question is string 
-                   && request.resource.data.options is list 
-                   && request.resource.data.options.size() >= 2;
-    }
-    match /game_sessions/{sessionId} {
-      allow read: if true;
-      allow write: if request.resource.data.score is number 
-                   && request.resource.data.accuracy is number 
-                   && !('videoStream' in request.resource.data) 
-                   && !('landmarks' in request.resource.data) 
-                   && !('faceBiometrics' in request.resource.data);
-    }
-  }
-}`;
-    navigator.clipboard.writeText(rulesText).then(() => {
+    navigator.clipboard.writeText(firestoreRules).then(() => {
       this.audio.playClick();
       alert("Aturan keamanan (firestore.rules) berhasil disalin ke clipboard! Buka Firebase Console > Firestore Database > Rules dan tempel di sana.");
     }).catch(() => {
@@ -3328,7 +3396,7 @@ service cloud.firestore {
       <div class="screen-mp-host-lobby animate-fade-in">
         <div class="mp-lobby-top">
           <button id="btn-mp-lobby-back" class="back-link-btn">← Kembali ke Hub</button>
-          <span class="calib-live-badge"><span class="status-dot"></span> HOST MODE</span>
+          <span class="calib-live-badge" id="mp-host-sync-badge"><span class="status-dot"></span> HOST MODE</span>
         </div>
 
         <div class="mp-lobby-header-card">
@@ -3443,6 +3511,12 @@ service cloud.firestore {
 
     const pinEl = document.getElementById("mp-display-pin");
     if (pinEl) pinEl.textContent = room.roomCode;
+    const syncBadge = document.getElementById("mp-host-sync-badge");
+    if (syncBadge) {
+      syncBadge.textContent = this.multiplayer.cloudConnected
+        ? "☁️ HOST CLOUD AMAN"
+        : "💻 HOST LOKAL — login guru diperlukan untuk cloud";
+    }
 
     // Setting changes listener
     const updateSettings = () => {
@@ -3512,8 +3586,8 @@ service cloud.firestore {
     } else {
       gridEl.innerHTML = players.map((p) => `
         <div class="mp-player-chip animate-scale-up">
-          <span class="mp-chip-avatar">${p.avatar || '🦁'}</span>
-          <span class="mp-chip-name">${p.name}</span>
+          <span class="mp-chip-avatar">${escapeHTML(p.avatar || '🦁')}</span>
+          <span class="mp-chip-name">${escapeHTML(p.name)}</span>
           <span class="mp-chip-ready">✓ Siap</span>
         </div>
       `).join("");
@@ -3656,7 +3730,7 @@ service cloud.firestore {
             <h4>Teman Sekelas di Room Ini:</h4>
             <div id="mp-peer-chips" class="mp-peers-chips-grid">
               ${Object.values(room?.players || {}).map((p) => `
-                <span class="mp-peer-tag">${p.avatar || '🦁'} ${p.name}</span>
+                <span class="mp-peer-tag">${escapeHTML(p.avatar || '🦁')} ${escapeHTML(p.name)}</span>
               `).join("")}
             </div>
           </div>
@@ -3679,7 +3753,7 @@ service cloud.firestore {
     const chipsEl = document.getElementById("mp-peer-chips");
     if (!chipsEl || !room) return;
     chipsEl.innerHTML = Object.values(room.players || {}).map((p) => `
-      <span class="mp-peer-tag">${p.avatar || '🦁'} ${p.name}</span>
+      <span class="mp-peer-tag">${escapeHTML(p.avatar || '🦁')} ${escapeHTML(p.name)}</span>
     `).join("");
   }
 
@@ -3698,7 +3772,7 @@ service cloud.firestore {
         <div class="game-hud-bar">
           <div class="hud-left">
             <span class="hud-pill hud-q-num">SOAL ${qIndex} / ${totalQ}</span>
-            <span class="hud-pill hud-topic">${currentQ.topic || currentQ.category.toUpperCase()}</span>
+            <span class="hud-pill hud-topic">${escapeHTML(currentQ.topic || currentQ.category?.toUpperCase() || "Materi")}</span>
             <span class="hud-pill" style="background:#7C3AED22; color:#7C3AED;">ROOM: ${room.roomCode}</span>
           </div>
 
@@ -3720,7 +3794,7 @@ service cloud.firestore {
 
         <!-- Question Presentation -->
         <div class="question-main-card" style="padding:28px 36px; margin: 14px 0;">
-          <h2 class="question-title-text" style="font-size:2.2rem;">${currentQ.question}</h2>
+          <h2 class="question-title-text" style="font-size:2.2rem;">${escapeHTML(currentQ.question)}</h2>
         </div>
 
         <!-- 4 Options Grid -->
@@ -3733,7 +3807,7 @@ service cloud.firestore {
                 <div class="opt-gesture-badge"><span>${gestureIcon}</span></div>
                 <div class="opt-body">
                   <span class="opt-label-letter">${letter}</span>
-                  <span class="opt-text">${opt}</span>
+                  <span class="opt-text">${escapeHTML(opt)}</span>
                 </div>
               </div>
             `;
@@ -3806,7 +3880,7 @@ service cloud.firestore {
 
     chipsEl.innerHTML = players.map((p) => `
       <span class="mp-chip-student ${p.hasAnswered ? 'answered' : ''}">
-        ${p.avatar || '🦁'} ${p.name} ${p.hasAnswered ? '✓' : '...'}
+        ${escapeHTML(p.avatar || '🦁')} ${escapeHTML(p.name)} ${p.hasAnswered ? '✓' : '...'}
       </span>
     `).join("");
 
@@ -3835,8 +3909,8 @@ service cloud.firestore {
         <!-- TOP STATUS -->
         <div class="mp-player-game-header">
           <div class="mp-player-info-pill">
-            <span>${player?.avatar || '🦁'}</span>
-            <strong>${player?.name || 'Siswa'}</strong>
+            <span>${escapeHTML(player?.avatar || '🦁')}</span>
+            <strong>${escapeHTML(player?.name || 'Siswa')}</strong>
             <span class="mp-score-val">${player?.score || 0} PTS</span>
           </div>
           <span class="hud-pill hud-q-num">SOAL ${qIndex} / ${totalQ}</span>
@@ -3844,11 +3918,11 @@ service cloud.firestore {
 
         <!-- Question Card -->
         <div class="question-main-card" style="padding:18px 20px; margin: 12px 0;">
-          <h3 class="question-title-text" style="font-size:1.35rem; line-height:1.3;">${currentQ.question}</h3>
+          <h3 class="question-title-text" style="font-size:1.35rem; line-height:1.3;">${escapeHTML(currentQ.question)}</h3>
         </div>
 
         <!-- Lock Status Banner -->
-        <div id="mp-player-lock-banner" class="mp-lock-banner ${player?.hasAnswered ? 'locked' : 'hidden'}">
+        <div id="mp-player-lock-banner" class="mp-lock-banner ${player?.hasAnswered ? 'locked' : 'hidden'}" aria-live="polite">
           ${player?.hasAnswered 
             ? `✅ Jawaban Terkunci: <strong>Pilihan ${player.lastAnswer}</strong> (${((player.answerTimeMs || 0)/1000).toFixed(1)}s)`
             : 'Menunggu pilihan gerakanmu di depan kamera...'}
@@ -3865,7 +3939,7 @@ service cloud.firestore {
                 <div class="opt-gesture-badge"><span>${gestureIcon}</span></div>
                 <div class="opt-body">
                   <span class="opt-label-letter">${letter}</span>
-                  <span class="opt-text" style="font-size:1.15rem;">${opt}</span>
+                  <span class="opt-text" style="font-size:1.15rem;">${escapeHTML(opt)}</span>
                 </div>
               </div>
             `;
@@ -3904,9 +3978,9 @@ service cloud.firestore {
 
     const res = await this.multiplayer.submitAnswer(answerKey);
     if (res && res.success) {
-      if (res.isCorrect) {
+      if (res.isCorrect === true) {
         this.audio.playCorrect();
-      } else {
+      } else if (res.isCorrect === false) {
         this.audio.playWrong();
       }
       this.updateMultiplayerPlayerAnsweredUI(answerKey, res);
@@ -3950,9 +4024,9 @@ service cloud.firestore {
           <span class="mp-round-icon">🎯</span>
           <h2>Hasil Ronde Soal ${room.currentQuestionIndex + 1}</h2>
           <div class="mp-correct-answer-banner">
-            Jawaban Benar: <strong>Pilihan ${correctLetter} — ${currentQ.options[currentQ.correctAnswer]}</strong>
+            Jawaban Benar: <strong>Pilihan ${correctLetter} — ${escapeHTML(currentQ.options[currentQ.correctAnswer])}</strong>
           </div>
-          ${currentQ.explanation ? `<p class="mp-round-exp">💡 <em>${currentQ.explanation}</em></p>` : ''}
+          ${currentQ.explanation ? `<p class="mp-round-exp">💡 <em>${escapeHTML(currentQ.explanation)}</em></p>` : ''}
         </div>
 
         <!-- Answer Distribution Bars -->
@@ -3983,8 +4057,8 @@ service cloud.firestore {
             ${leaderboard.map((p, idx) => `
               <div class="mp-rank-row ${idx === 0 ? 'top-1' : ''} ${p.id === this.multiplayer.localPlayerId ? 'my-row' : ''}">
                 <span class="mp-rank-num">#${idx + 1}</span>
-                <span class="mp-rank-avatar">${p.avatar || '🦁'}</span>
-                <span class="mp-rank-name">${p.name} ${p.id === this.multiplayer.localPlayerId ? '<strong>(Kamu)</strong>' : ''}</span>
+                <span class="mp-rank-avatar">${escapeHTML(p.avatar || '🦁')}</span>
+                <span class="mp-rank-name">${escapeHTML(p.name)} ${p.id === this.multiplayer.localPlayerId ? '<strong>(Kamu)</strong>' : ''}</span>
                 <span class="mp-rank-streak">${p.streak > 1 ? `🔥 ${p.streak}x` : ''}</span>
                 <span class="mp-rank-round-pts">${p.pointsEarned ? `+${p.pointsEarned}` : '+0'}</span>
                 <span class="mp-rank-score">${p.score.toLocaleString()} PTS</span>
@@ -4084,8 +4158,8 @@ service cloud.firestore {
             ${leaderboard.map((p, idx) => `
               <div class="mp-full-row">
                 <span class="mp-full-rank">#${idx + 1}</span>
-                <span class="mp-full-avatar">${p.avatar || '🦁'}</span>
-                <span class="mp-full-name">${p.name}</span>
+                <span class="mp-full-avatar">${escapeHTML(p.avatar || '🦁')}</span>
+                <span class="mp-full-name">${escapeHTML(p.name)}</span>
                 <span class="mp-full-correct">Jawaban Benar: ${p.correctCount || 0}</span>
                 <span class="mp-full-score">${p.score.toLocaleString()} PTS</span>
               </div>

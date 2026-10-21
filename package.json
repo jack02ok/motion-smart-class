@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test",
+    "check": "npm run test && npm run build"
   },
   "devDependencies": {
     "vite": "^8.3.4"
@@ -14,5 +16,8 @@
   "dependencies": {
     "canvas-confetti": "^1.9.4",
     "firebase": "^13.0.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.6"
   }
 }

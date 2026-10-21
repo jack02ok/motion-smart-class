@@ -13,10 +13,17 @@ import {
   setDoc,
   getDoc,
   updateDoc,
-  deleteDoc,
-  onSnapshot
+  onSnapshot,
+  runTransaction
 } from "firebase/firestore";
-import { getDb, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
+import {
+  ensureAnonymousAuth,
+  getCurrentUser,
+  getDb,
+  isFirebaseConfigured,
+  getFirebaseConfig
+} from "../firebase.js";
+import { cleanText } from "../utils/security.js";
 
 export const ROOM_STATUS = {
   LOBBY: "LOBBY",
@@ -28,6 +35,7 @@ export const ROOM_STATUS = {
 };
 
 const ROOMS_COLLECTION = "msc_rooms";
+const ROOM_SECRETS_COLLECTION = "msc_room_secrets";
 const LOCAL_STORAGE_PREFIX = "MSC_ROOM_";
 const BROADCAST_CHANNEL_NAME = "msc_multiplayer_sync";
 
@@ -39,6 +47,8 @@ export class MultiplayerEngine {
     this.localPlayerId = this._getOrCreatePlayerId();
     this.localPlayerName = "Siswa";
     this.localPlayerAvatar = "🦁";
+    this.hostQuestions = [];
+    this.cloudConnected = false;
 
     // Callbacks
     this.onRoomUpdate = null;
@@ -114,8 +124,13 @@ export class MultiplayerEngine {
   static generateRoomCode() {
     const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     let code = "";
+    const random = new Uint32Array(6);
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      crypto.getRandomValues(random);
+    }
     for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+      const value = random[i] || Math.floor(Math.random() * 0xFFFFFFFF);
+      code += chars.charAt(value % chars.length);
     }
     return code;
   }
@@ -126,6 +141,13 @@ export class MultiplayerEngine {
   isOnlineFirestoreActive() {
     const config = getFirebaseConfig();
     return isFirebaseConfigured(config) && (typeof window !== "undefined") && Boolean(getDb());
+  }
+
+  async _ensureCloudIdentity() {
+    if (!this.isOnlineFirestoreActive()) return null;
+    const user = getCurrentUser() || await ensureAnonymousAuth();
+    if (user?.uid) this.localPlayerId = user.uid;
+    return user;
   }
 
   // ==========================================
@@ -144,12 +166,17 @@ export class MultiplayerEngine {
     timeLimit = 30,
     questions = []
   } = {}) {
+    const cloudUser = await this._ensureCloudIdentity().catch(() => null);
     this.isHost = true;
     this.roomCode = MultiplayerEngine.generateRoomCode();
+
+    this.hostQuestions = questions.slice(0, totalQuestions).map((question) => ({ ...question }));
+    const publicQuestions = this.hostQuestions.map(({ correctAnswer, explanation, ...question }) => question);
 
     const newRoom = {
       roomCode: this.roomCode,
       hostId: this.localPlayerId,
+      hostUid: cloudUser?.uid || this.localPlayerId,
       hostName,
       createdAt: Date.now(),
       status: ROOM_STATUS.LOBBY,
@@ -160,7 +187,7 @@ export class MultiplayerEngine {
         totalQuestions,
         timeLimit
       },
-      questions: questions.slice(0, totalQuestions),
+      questions: publicQuestions,
       currentQuestionIndex: 0,
       questionStartedAt: 0,
       countdownSec: 3,
@@ -177,10 +204,17 @@ export class MultiplayerEngine {
       try {
         const db = getDb();
         const roomDocRef = doc(db, ROOMS_COLLECTION, this.roomCode);
+        await setDoc(doc(db, ROOM_SECRETS_COLLECTION, this.roomCode), {
+          hostUid: cloudUser?.uid || this.localPlayerId,
+          questions: this.hostQuestions,
+          createdAt: Date.now()
+        });
         await setDoc(roomDocRef, newRoom);
+        this.cloudConnected = true;
         this._subscribeToFirestoreRoom(this.roomCode);
         console.log(`[Multiplayer] Cloud Firestore room created: ${this.roomCode}`);
       } catch (err) {
+        this.cloudConnected = false;
         console.warn("[Multiplayer] Firestore createRoom error, running in local channel mode:", err);
       }
     }
@@ -231,8 +265,9 @@ export class MultiplayerEngine {
    * Host moves to round result / leaderboard
    */
   async advanceToRoundResult() {
-    if (!this.isHost || !this.currentRoom) return;
+    if (!this.isHost || !this.currentRoom || this.currentRoom.status !== ROOM_STATUS.QUESTION) return;
 
+    await this._scoreCurrentRound();
     this.currentRoom.status = ROOM_STATUS.ROUND_RESULT;
     this.currentRoom.leaderboard = this.getLeaderboard();
 
@@ -298,10 +333,11 @@ export class MultiplayerEngine {
    * Join an existing room with code
    */
   async joinRoom(roomCode, { name = "Siswa", avatar = "🦁" } = {}) {
+    const cloudUser = await this._ensureCloudIdentity().catch(() => null);
     this.isHost = false;
     this.roomCode = roomCode.trim().toUpperCase();
-    this.localPlayerName = name.trim() || "Siswa";
-    this.localPlayerAvatar = avatar || "🦁";
+    this.localPlayerName = cleanText(name, 40) || "Siswa";
+    this.localPlayerAvatar = cleanText(avatar, 8) || "🦁";
 
     let room = await this._fetchRoom(this.roomCode);
 
@@ -331,7 +367,23 @@ export class MultiplayerEngine {
     };
 
     this.currentRoom = room;
-    await this._syncRoomUpdate(room);
+    if (this.isOnlineFirestoreActive() && cloudUser) {
+      const db = getDb();
+      const roomDocRef = doc(db, ROOMS_COLLECTION, this.roomCode);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(roomDocRef);
+        if (!snapshot.exists()) throw new Error("Room tidak ditemukan.");
+        const latest = snapshot.data();
+        if (latest.status === ROOM_STATUS.FINISHED) throw new Error("Room sudah selesai.");
+        latest.players = latest.players || {};
+        latest.players[this.localPlayerId] = room.players[this.localPlayerId];
+        transaction.update(roomDocRef, { players: latest.players });
+        this.currentRoom = latest;
+      });
+      this._saveRoomLocally(this.currentRoom);
+    } else {
+      await this._syncRoomUpdate(room);
+    }
 
     // Subscribe to updates
     if (this.isOnlineFirestoreActive()) {
@@ -372,48 +424,53 @@ export class MultiplayerEngine {
     if (!currentQ) return { success: false, reason: "Soal tidak tersedia" };
 
     // Convert key to numeric index (0=A, 1=B, 2=C, 3=D)
-    let selectedIndex = 0;
+    let selectedIndex = -1;
     if (typeof answerKey === "number") {
       selectedIndex = answerKey;
     } else {
       const map = { A: 0, B: 1, C: 2, D: 3 };
-      selectedIndex = map[answerKey] ?? 0;
+      selectedIndex = map[answerKey] ?? -1;
+    }
+    if (selectedIndex < 0 || selectedIndex > 3 || selectedIndex >= currentQ.options.length) {
+      return { success: false, reason: "Pilihan jawaban tidak valid" };
     }
 
-    const isCorrect = selectedIndex === currentQ.correctAnswer;
     const responseTimeMs = Math.max(200, Date.now() - (this.currentRoom.questionStartedAt || Date.now()));
-
-    // Scoring formula: Base 100 + Speed Bonus (up to 50 for < 2.5s) + Streak Bonus (20 per streak)
-    let pointsEarned = 0;
-    if (isCorrect) {
-      player.correctCount = (player.correctCount || 0) + 1;
-      player.streak = (player.streak || 0) + 1;
-
-      const maxTimeMs = (currentQ.timeLimit || 30) * 1000;
-      const speedRatio = Math.max(0, 1 - (responseTimeMs / maxTimeMs));
-      const speedBonus = Math.round(speedRatio * 50);
-      const streakBonus = Math.min(60, (player.streak - 1) * 20);
-
-      pointsEarned = 100 + speedBonus + streakBonus;
-      player.score += pointsEarned;
-    } else {
-      player.streak = 0;
-    }
 
     player.hasAnswered = true;
     player.lastAnswer = ["A", "B", "C", "D"][selectedIndex];
     player.answerTimeMs = responseTimeMs;
-    player.isCorrect = isCorrect;
-    player.pointsEarned = pointsEarned;
-
-    await this._syncRoomUpdate(this.currentRoom);
+    if (this.isOnlineFirestoreActive()) {
+      await this._ensureCloudIdentity();
+      const db = getDb();
+      const roomDocRef = doc(db, ROOMS_COLLECTION, this.roomCode);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(roomDocRef);
+        if (!snapshot.exists()) throw new Error("Room tidak ditemukan.");
+        const latest = snapshot.data();
+        const latestPlayer = latest.players?.[this.localPlayerId];
+        if (!latestPlayer) throw new Error("Pemain tidak terdaftar di room.");
+        if (latestPlayer.hasAnswered) throw new Error("Jawaban sudah dikunci.");
+        const updatedPlayer = {
+          ...latestPlayer,
+          hasAnswered: true,
+          lastAnswer: player.lastAnswer,
+          answerTimeMs: responseTimeMs
+        };
+        const players = { ...latest.players, [this.localPlayerId]: updatedPlayer };
+        transaction.update(roomDocRef, { players });
+        this.currentRoom = { ...latest, players };
+      });
+      this._saveRoomLocally(this.currentRoom);
+    } else {
+      await this._syncRoomUpdate(this.currentRoom);
+    }
 
     return {
       success: true,
-      isCorrect,
-      pointsEarned,
+      pending: true,
       responseTimeMs,
-      streak: player.streak
+      answer: player.lastAnswer
     };
   }
 
@@ -433,6 +490,62 @@ export class MultiplayerEngine {
   // ==========================================
   // HELPERS & SYNC ENGINE
   // ==========================================
+
+  async _getHostQuestion(index) {
+    if (this.hostQuestions[index]) return this.hostQuestions[index];
+    if (!this.isHost || !this.isOnlineFirestoreActive()) return null;
+    try {
+      const snapshot = await getDoc(doc(getDb(), ROOM_SECRETS_COLLECTION, this.roomCode));
+      if (snapshot.exists()) {
+        this.hostQuestions = snapshot.data().questions || [];
+        return this.hostQuestions[index] || null;
+      }
+    } catch (error) {
+      console.error("[Multiplayer] Unable to load protected answer key:", error);
+    }
+    return null;
+  }
+
+  async _scoreCurrentRound() {
+    const room = this.currentRoom;
+    if (!room) return;
+    const index = room.currentQuestionIndex;
+    const privateQuestion = await this._getHostQuestion(index);
+    if (!privateQuestion || typeof privateQuestion.correctAnswer !== "number") {
+      throw new Error("Kunci jawaban privat tidak tersedia untuk host.");
+    }
+
+    const correctLetter = ["A", "B", "C", "D"][privateQuestion.correctAnswer];
+    Object.values(room.players || {}).forEach((player) => {
+      if (!player.hasAnswered) {
+        player.isCorrect = false;
+        player.pointsEarned = 0;
+        player.streak = 0;
+        return;
+      }
+      const isCorrect = player.lastAnswer === correctLetter;
+      let pointsEarned = 0;
+      if (isCorrect) {
+        player.correctCount = (player.correctCount || 0) + 1;
+        player.streak = (player.streak || 0) + 1;
+        const maxTimeMs = (privateQuestion.timeLimit || room.settings?.timeLimit || 30) * 1000;
+        const speedRatio = Math.max(0, 1 - ((player.answerTimeMs || maxTimeMs) / maxTimeMs));
+        pointsEarned = 100 + Math.round(speedRatio * 50) + Math.min(60, (player.streak - 1) * 20);
+        player.score = (player.score || 0) + pointsEarned;
+      } else {
+        player.streak = 0;
+      }
+      player.isCorrect = isCorrect;
+      player.pointsEarned = pointsEarned;
+    });
+
+    // Publish the answer only after the round closes, never while students can answer.
+    room.questions[index] = {
+      ...room.questions[index],
+      correctAnswer: privateQuestion.correctAnswer,
+      explanation: privateQuestion.explanation || ""
+    };
+  }
 
   _resetPlayerAnswersForNewRound() {
     if (!this.currentRoom?.players) return;
@@ -547,7 +660,7 @@ export class MultiplayerEngine {
    * Get sorted leaderboard array from current room players
    */
   getLeaderboard() {
-    if (this.roomCode) {
+    if (!this.currentRoom && this.roomCode) {
       const latest = this._getRoomLocally(this.roomCode);
       if (latest && latest.players) this.currentRoom = latest;
     }
@@ -562,7 +675,7 @@ export class MultiplayerEngine {
    * Get counts of answers (A, B, C, D) for the current active question
    */
   getAnswerDistribution() {
-    if (this.roomCode) {
+    if (!this.currentRoom && this.roomCode) {
       const latest = this._getRoomLocally(this.roomCode);
       if (latest && latest.players) this.currentRoom = latest;
     }

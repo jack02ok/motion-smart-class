@@ -5,7 +5,15 @@
  */
 
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, getDocs, limit, query } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, limit, query } from "firebase/firestore";
+import {
+  browserLocalPersistence,
+  getAuth,
+  setPersistence,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  signOut
+} from "firebase/auth";
 
 const STORAGE_CONFIG_KEY = "MSC_FIREBASE_CONFIG";
 
@@ -53,6 +61,7 @@ export function isFirebaseConfigured(config = getFirebaseConfig()) {
 
 let firebaseApp = null;
 let firestoreDb = null;
+let firebaseAuth = null;
 
 /**
  * Initialize or get existing Firebase App and Firestore instance
@@ -84,6 +93,7 @@ export function initFirebase(customConfig = null) {
     }
 
     firestoreDb = getFirestore(firebaseApp);
+    firebaseAuth = getAuth(firebaseApp);
 
     return {
       app: firebaseApp,
@@ -112,6 +122,58 @@ export function getDb() {
     return res.db;
   }
   return firestoreDb;
+}
+
+export function getCurrentUser() {
+  return firebaseAuth?.currentUser || null;
+}
+
+export function getAuthInstance() {
+  if (!firebaseAuth) initFirebase();
+  return firebaseAuth;
+}
+
+/** Authenticate classroom devices anonymously and return their stable Firebase UID. */
+export async function ensureAnonymousAuth() {
+  if (typeof window === "undefined" || !isFirebaseConfigured()) return null;
+  const auth = getAuthInstance();
+  if (!auth) return null;
+  if (auth.currentUser) return auth.currentUser;
+  await setPersistence(auth, browserLocalPersistence);
+  const credential = await signInAnonymously(auth);
+  return credential.user;
+}
+
+/** Sign in a teacher and verify their server-managed /users/{uid}.role. */
+export async function signInTeacher(email, password) {
+  const auth = getAuthInstance();
+  const db = getDb();
+  if (!auth || !db) throw new Error("Firebase belum dikonfigurasi.");
+  await setPersistence(auth, browserLocalPersistence);
+  const credential = await signInWithEmailAndPassword(auth, email, password);
+  const profile = await getDoc(doc(db, "users", credential.user.uid));
+  if (!profile.exists() || profile.data()?.role !== "teacher") {
+    await signOut(auth);
+    throw new Error("Akun ini belum memiliki role teacher di Firestore.");
+  }
+  return credential.user;
+}
+
+export async function getTeacherAuthStatus() {
+  const user = getCurrentUser();
+  const db = getDb();
+  if (!user || !db || user.isAnonymous) return { signedIn: Boolean(user), isTeacher: false, user };
+  try {
+    const profile = await getDoc(doc(db, "users", user.uid));
+    return { signedIn: true, isTeacher: profile.exists() && profile.data()?.role === "teacher", user };
+  } catch {
+    return { signedIn: true, isTeacher: false, user };
+  }
+}
+
+export async function signOutFirebaseUser() {
+  const auth = getAuthInstance();
+  if (auth) await signOut(auth);
 }
 
 /**
@@ -174,6 +236,7 @@ export function saveFirebaseConfig(config) {
     // Re-initialize
     firebaseApp = null;
     firestoreDb = null;
+    firebaseAuth = null;
     return initFirebase(config);
   } catch (e) {
     console.error("Failed to save Firebase config:", e);
@@ -191,6 +254,7 @@ export function resetFirebaseConfig() {
     }
     firebaseApp = null;
     firestoreDb = null;
+    firebaseAuth = null;
     return initFirebase();
   } catch (e) {
     console.error("Failed to reset Firebase config:", e);

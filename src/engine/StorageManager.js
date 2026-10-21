@@ -1,3 +1,5 @@
+import { cleanText } from "../utils/security.js";
+
 /**
  * MOTION SMART CLASS - Storage Manager
  * Comprehensive LocalStorage management for Settings, Custom Questions, Team scores, Analytics & Badges.
@@ -20,7 +22,7 @@ const DEFAULT_SETTINGS = {
   debugMode: false,
   cameraEnabled: true,
   preferredCameraId: "user",
-  teacherPin: "1234",
+  teacherPin: "",
   basePoints: 100,
   speedBonusEnabled: true,
   comboMultiplierEnabled: true
@@ -140,10 +142,10 @@ export class StorageManager {
         const item = incoming[i];
         if (!item || typeof item !== "object") continue;
 
-        const question = (item.question || "").trim();
+        const question = cleanText(item.question, 1000);
         if (!question) continue;
 
-        const options = Array.isArray(item.options) ? item.options.map((o) => String(o).trim()) : [];
+        const options = Array.isArray(item.options) ? item.options.slice(0, 4).map((o) => cleanText(o, 300)) : [];
         if (options.length < 2) continue;
 
         const correctAnswer = typeof item.correctAnswer === "number" && item.correctAnswer >= 0 && item.correctAnswer < options.length
@@ -151,16 +153,18 @@ export class StorageManager {
           : 0;
 
         const validItem = {
-          id: item.id && !item.id.startsWith("default-") ? item.id : "custom-" + Date.now() + "-" + i,
+          id: item.id && !String(item.id).startsWith("default-")
+            ? cleanText(item.id, 80).replace(/[^a-zA-Z0-9_-]/g, "-")
+            : "custom-" + Date.now() + "-" + i,
           category: item.category === "literasi" ? "literasi" : "numerasi",
-          topic: (item.topic || "Materi Umum").trim(),
+          topic: cleanText(item.topic || "Materi Umum", 100),
           grade: parseInt(item.grade, 10) >= 1 && parseInt(item.grade, 10) <= 6 ? parseInt(item.grade, 10) : 4,
           difficulty: ["easy", "medium", "hard"].includes(item.difficulty) ? item.difficulty : "medium",
-          passage: (item.passage || "").trim(),
+          passage: cleanText(item.passage, 3000),
           question,
           options,
           correctAnswer,
-          explanation: (item.explanation || "").trim(),
+          explanation: cleanText(item.explanation, 2000),
           timeLimit: parseInt(item.timeLimit, 10) || 40,
           pointWeight: parseInt(item.pointWeight, 10) || 100,
           gestureMap: item.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
@@ -320,19 +324,6 @@ export class StorageManager {
         total: totalQuestions,
         streak: 0
       });
-
-      // Mirror to Firestore in background (non-blocking)
-      try {
-        import("./FirestoreManager.js")
-          .then(({ FirestoreManager }) => {
-            FirestoreManager.recordGameSession(sessionEntry).catch((err) => {
-              console.warn("[StorageManager] Async Firestore session sync failed:", err);
-            });
-          })
-          .catch(() => {});
-      } catch (err) {
-        // Safe node/fallback environment
-      }
 
       return sessionEntry;
     } catch (e) {

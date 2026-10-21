@@ -1,3 +1,5 @@
+import { FirestoreManager } from "./FirestoreManager.js";
+
 /**
  * MOTION SMART CLASS - Game Engine
  * State machine managing game modes, countdowns, rounds, feedback, and progression.
@@ -533,7 +535,7 @@ export class GameEngine {
     const weakTopics = this.scoreEngine.getWeakTopics();
 
     // Record session learning analytics
-    this.storage.recordSessionAnalytics({
+    const sessionEntry = this.storage.recordSessionAnalytics({
       mode: this.selectedMode,
       category: this.selectedCategory,
       grade: this.selectedGrade,
@@ -546,6 +548,11 @@ export class GameEngine {
       topicMastery: this.scoreEngine.topicStats,
       weakTopics
     });
+    if (sessionEntry) {
+      FirestoreManager.recordGameSession(sessionEntry, { saveLocal: false }).catch((error) => {
+        console.warn("[GameEngine] Firestore analytics sync failed:", error);
+      });
+    }
 
     const badge = this.scoreEngine.getBadge(this.selectedCategory);
     const level = this.scoreEngine.getLevel();

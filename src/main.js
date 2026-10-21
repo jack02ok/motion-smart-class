@@ -15,6 +15,7 @@ import { PoseDetector } from "./engine/PoseDetector.js";
 import { GestureEngine } from "./engine/GestureEngine.js";
 import { GameEngine, GAME_STATES } from "./engine/GameEngine.js";
 import { UIManager } from "./engine/UIManager.js";
+import { ensureAnonymousAuth } from "./firebase.js";
 
 // Initialize application
 document.addEventListener("DOMContentLoaded", () => {
@@ -63,7 +64,9 @@ document.addEventListener("DOMContentLoaded", () => {
   gameEngine.setState(GAME_STATES.HOME);
 
   // Pre-load Cloud Firestore questions asynchronously in background
-  questionEngine.loadFirestoreQuestions().then((questions) => {
+  ensureAnonymousAuth().catch((err) => {
+    console.warn("[Motion Smart Class] Anonymous Firebase authentication unavailable:", err);
+  }).then(() => questionEngine.loadFirestoreQuestions()).then((questions) => {
     if (questions && questions.length > 0) {
       console.log(`[Motion Smart Class] Synced ${questions.length} questions from Cloud Firestore.`);
     }

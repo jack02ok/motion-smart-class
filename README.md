@@ -37,7 +37,9 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - Mendukung 4 Tim: 🔴 Tim Merah, 🔵 Tim Biru, 🟢 Tim Hijau, 🟡 Tim Kuning.
 - Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
 
-### 5. Mode Guru (Teacher Mode - PIN: `1234`)
+### 5. Mode Guru (Teacher Mode)
+- Pada penggunaan lokal, PIN dibuat saat Mode Guru dibuka pertama kali dan disimpan hanya di browser perangkat tersebut.
+- Pada penggunaan Cloud Firestore, operasi cloud guru memerlukan Firebase Authentication dan profil role `teacher`; PIN lokal bukan pengganti autentikasi cloud.
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, dan durasi *hold/cooldown*.
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru (disimpan permanen di LocalStorage).
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON.
@@ -91,6 +93,8 @@ motion-smart-class/
 
 ## 💻 Cara Menjalankan
 
+Gunakan Node.js 22 atau versi LTS yang kompatibel.
+
 ### 1. Jalankan Dev Server
 ```bash
 cd motion-smart-class
@@ -103,3 +107,22 @@ Buka browser di: `http://localhost:5173/`
 npm run build
 npm run preview
 ```
+
+### 3. Test dan pemeriksaan produksi
+
+```bash
+npm ci
+npm run check
+```
+
+## 🔐 Konfigurasi Firebase yang aman
+
+1. Aktifkan **Email/Password** dan **Anonymous** di Firebase Authentication.
+2. Buat akun guru melalui Firebase Console.
+3. Buat dokumen `users/{uid-guru}` dengan field `role` bernilai `teacher`. Dokumen role tidak dapat dibuat atau diubah oleh client.
+4. Deploy `firestore.rules` dari repository ini.
+5. Aktifkan Firebase App Check untuk deployment produksi.
+
+Perangkat siswa masuk secara anonim dan UID Firebase digunakan sebagai identitas pemain. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban. Kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca akun guru.
+
+> Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. PIN lokal hanya mengunci tampilan pada satu browser dan bukan mekanisme otorisasi server.
