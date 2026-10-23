@@ -78,6 +78,20 @@ async function runTests() {
   assert.strictEqual(importedQuestion.imageAlt, "Peta Indonesia");
   console.log("✓ importCustomQuestions (Valid JSON): PASS");
 
+  const csvResult = StorageManager.importQuestionsFromCSV([
+    "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation",
+    '"Hasil 5 + 5?",8,9,10,11,C,numerasi,2,easy,Penjumlahan,,,"Lima ditambah lima"'
+  ].join("\n"));
+  assert.strictEqual(csvResult.success, true);
+  assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
+  console.log("✓ importQuestionsFromCSV: PASS");
+
+  const savedPackage = StorageManager.saveSessionPackage({ name: "Pecahan Kelas 4", mode: "cooperative", count: 10 });
+  assert.strictEqual(savedPackage.mode, "cooperative");
+  assert.ok(StorageManager.getSessionPackages().some((pkg) => pkg.id === savedPackage.id));
+  StorageManager.deleteSessionPackage(savedPackage.id);
+  console.log("✓ session package persistence: PASS");
+
   // Import Invalid JSON
   const invalidImportResult = StorageManager.importCustomQuestions([
     { question: "", options: ["A"] } // missing options, empty question
@@ -109,6 +123,8 @@ async function runTests() {
   console.log("\n[2] Testing QuestionEngine...");
   const { QuestionEngine } = await import("../src/engine/QuestionEngine.js");
   const qEngine = new QuestionEngine();
+  const optionShuffle = qEngine.shuffleQuestionOptions({ options: ["A", "B", "C", "D"], correctAnswer: 2 });
+  assert.strictEqual(optionShuffle.options[optionShuffle.correctAnswer], "C", "Shuffling must preserve the answer key");
 
   const numQuestions = qEngine.getQuestions({ category: "numerasi", grade: 4, count: 5 });
   assert.ok(numQuestions.length > 0, "Should return numerasi questions");
@@ -240,6 +256,17 @@ async function runTests() {
   const resSquat = gestureEngine.classifyPose(landmarksSquat);
   assert.strictEqual(resSquat.gesture, GESTURE_TYPES.D, "Gesture D is Squat");
   console.log("✓ Gesture D (Squat Position): PASS");
+
+  gestureEngine.setMovementProfile("hands_only");
+  const crossedArms = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+  crossedArms[0] = { x: 0.5, y: 0.25, visibility: 0.9 };
+  crossedArms[11] = { x: 0.62, y: 0.42, visibility: 0.9 };
+  crossedArms[12] = { x: 0.38, y: 0.42, visibility: 0.9 };
+  crossedArms[15] = { x: 0.39, y: 0.43, visibility: 0.9 };
+  crossedArms[16] = { x: 0.61, y: 0.43, visibility: 0.9 };
+  assert.strictEqual(gestureEngine.classifyPose(crossedArms).gesture, GESTURE_TYPES.D, "Crossed arms must replace squat in hands-only mode");
+  gestureEngine.setMovementProfile("standard");
+  console.log("✓ accessible hands-only movement profile: PASS");
 
   // 5. Test Tahap 3: Motion Arena Zone Classification & Distance Estimation
   console.log("\n[5] Testing Tahap 3: Motion Arena Zones & Distance Calibration...");

@@ -129,6 +129,7 @@ export class FirestoreManager {
       explanation: (question.explanation || "").trim(),
       imageUrl: safeImageUrl(question.imageUrl),
       imageAlt: cleanText(question.imageAlt || question.question, 160),
+      imageLayout: ["contain", "wide", "compact"].includes(question.imageLayout) ? question.imageLayout : "contain",
       timeLimit: parseInt(question.timeLimit, 10) || 40,
       pointWeight: parseInt(question.pointWeight, 10) || 100,
       gestureMap: question.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
@@ -170,6 +171,7 @@ export class FirestoreManager {
       id,
       imageUrl: safeImageUrl(updatedData.imageUrl),
       imageAlt: cleanText(updatedData.imageAlt || updatedData.question, 160),
+      imageLayout: ["contain", "wide", "compact"].includes(updatedData.imageLayout) ? updatedData.imageLayout : "contain",
       updatedAt: new Date().toISOString()
     };
 

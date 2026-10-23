@@ -41,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
     holdDurationMs: settings.holdDurationSeconds * 1000,
     cooldownMs: settings.cooldownSeconds * 1000
   });
+  gestureEngine.setMovementProfile(settings.movementProfile);
 
   // 4. Core Game Engine
   const gameEngine = new GameEngine({

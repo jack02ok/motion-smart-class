@@ -38,6 +38,7 @@ export class UIManager {
     this.canvasEl = null;
     this.calibrationChecklist = {};
     this.debugPanelEl = null;
+    this.trainingGestures = new Set();
 
     // Online Multiplayer Engine
     this.multiplayer = new MultiplayerEngine();
@@ -172,6 +173,8 @@ export class UIManager {
                 <button class="tab-btn active" data-tab="tab-custom-questions">📋 Bank Soal Guru</button>
                 <button class="tab-btn" data-tab="tab-add-question">➕ / ✏️ Editor Soal</button>
                 <button class="tab-btn" data-tab="tab-analytics">📊 Analitik Belajar</button>
+                <button class="tab-btn" data-tab="tab-session-packages">🗂️ Paket Sesi</button>
+                <button class="tab-btn" data-tab="tab-media-library">🖼️ Media</button>
                 <button class="tab-btn" data-tab="tab-settings">⚙️ Pengaturan Penilaian</button>
                 <button class="tab-btn" data-tab="tab-teams">👥 Skor 4 Tim</button>
                 <button class="tab-btn" data-tab="tab-firebase">🔥 Cloud Firestore</button>
@@ -204,6 +207,11 @@ export class UIManager {
                       📥 Impor Soal (JSON)
                       <input type="file" id="import-json-input" accept=".json" style="display:none;" />
                     </label>
+                    <label class="secondary-btn btn-file-label" title="Impor soal dari template CSV">
+                      📊 Impor CSV
+                      <input type="file" id="import-csv-input" accept=".csv,text/csv" style="display:none;" />
+                    </label>
+                    <button type="button" id="btn-download-csv-template" class="secondary-btn" title="Unduh format kolom CSV">Template CSV</button>
                     <button id="btn-export-questions" class="secondary-btn" title="Ekspor seluruh bank soal ke JSON">📤 Ekspor Soal (JSON)</button>
                     <button id="btn-switch-to-add" class="primary-btn" title="Buka form pembuatan soal baru">➕ Tambah Soal Baru</button>
                   </div>
@@ -321,6 +329,14 @@ export class UIManager {
                       <label>Deskripsi Gambar:</label>
                       <input type="text" id="new-q-image-alt" maxlength="160" placeholder="Contoh: Diagram pecahan berbentuk lingkaran" />
                     </div>
+                    <div class="form-group">
+                      <label>Posisi Gambar:</label>
+                      <select id="new-q-image-layout">
+                        <option value="contain">Utuh di atas pertanyaan</option>
+                        <option value="wide">Lebar seperti banner</option>
+                        <option value="compact">Ringkas di samping/atas</option>
+                      </select>
+                    </div>
                     <div id="new-q-image-preview" class="question-image-preview hidden" aria-live="polite"></div>
                   </div>
 
@@ -369,6 +385,29 @@ export class UIManager {
                     <button type="button" id="btn-cancel-edit" class="secondary-btn hidden">Batal Edit ❌</button>
                   </div>
                 </form>
+              </div>
+
+              <!-- Session Packages -->
+              <div id="tab-session-packages" class="tab-content">
+                <div class="feature-panel-header">
+                  <div><h3>🗂️ Paket Sesi Pembelajaran</h3><p>Simpan konfigurasi kelas agar dapat dijalankan kembali dalam satu klik.</p></div>
+                </div>
+                <form id="form-session-package" class="session-package-form">
+                  <div class="form-group"><label>Nama Paket</label><input id="package-name" maxlength="80" placeholder="Contoh: Latihan Pecahan Kelas 4" required /></div>
+                  <div class="form-group"><label>Mode</label><select id="package-mode"><option value="quick_quiz">Kuis Gerak</option><option value="detective">Literasi Detektif</option><option value="cooperative">Target Bersama</option><option value="presentation">Presentasi Guru (sentuh)</option></select></div>
+                  <div class="form-group"><label>Kategori</label><select id="package-category"><option value="all">Campuran</option><option value="numerasi">Numerasi</option><option value="literasi">Literasi</option></select></div>
+                  <div class="form-group"><label>Kelas</label><select id="package-grade">${[1,2,3,4,5,6].map((grade) => `<option value="${grade}" ${grade === 4 ? "selected" : ""}>Kelas ${grade}</option>`).join("")}</select></div>
+                  <div class="form-group"><label>Kesulitan</label><select id="package-difficulty"><option value="all">Campuran</option><option value="easy">Mudah</option><option value="medium">Sedang</option><option value="hard">Sulit</option></select></div>
+                  <div class="form-group"><label>Jumlah Soal</label><input id="package-count" type="number" min="3" max="20" value="8" /></div>
+                  <button class="primary-btn" type="submit">Simpan Paket</button>
+                </form>
+                <div id="session-packages-list" class="session-packages-list"></div>
+              </div>
+
+              <!-- Media Library -->
+              <div id="tab-media-library" class="tab-content">
+                <div class="feature-panel-header"><div><h3>🖼️ Pustaka Media Soal</h3><p>Gambar dikumpulkan otomatis dari bank soal. Pilih gambar untuk digunakan kembali.</p></div></div>
+                <div id="media-library-grid" class="media-library-grid"></div>
               </div>
 
               <!-- Tab 3: Learning Analytics Dashboard -->
@@ -439,6 +478,12 @@ export class UIManager {
                     <label>PIN Guru:</label>
                     <input type="password" id="setting-pin" minlength="4" maxlength="12" autocomplete="new-password" />
                   </div>
+                  <div class="form-group"><label>Profil Gerakan:</label><select id="setting-movement-profile"><option value="standard">Standar (termasuk jongkok)</option><option value="hands_only">Hanya gerakan tangan</option></select><small>Profil tangan mengganti pilihan D menjadi silang tangan di depan dada.</small></div>
+                  <div class="form-group"><label>Target Jawaban Benar Bersama:</label><input type="number" id="setting-cooperative-goal" min="3" max="20" value="7" /></div>
+                  <label class="setting-check"><input type="checkbox" id="setting-large-text" /> Teks besar untuk layar kelas</label>
+                  <label class="setting-check"><input type="checkbox" id="setting-high-contrast" /> Kontras tinggi</label>
+                  <label class="setting-check"><input type="checkbox" id="setting-reduced-motion" /> Kurangi animasi</label>
+                  <label class="setting-check"><input type="checkbox" id="setting-shuffle-options" /> Acak urutan pilihan jawaban</label>
                 </div>
                 <button id="btn-save-settings" class="primary-btn mt-4">Simpan Pengaturan Kelas</button>
               </div>
@@ -658,6 +703,10 @@ export class UIManager {
           this.renderCustomQuestionsList();
         } else if (tabId === "tab-teams") {
           this.renderTeamsEditor();
+        } else if (tabId === "tab-session-packages") {
+          this.renderSessionPackages();
+        } else if (tabId === "tab-media-library") {
+          this.renderMediaLibrary();
         } else if (tabId === "tab-firebase") {
           this.renderFirebasePanel();
         }
@@ -690,20 +739,35 @@ export class UIManager {
       const cooldown = parseFloat(document.getElementById("setting-cooldown").value) || 1.2;
       const hold = parseFloat(document.getElementById("setting-hold").value) || 0.45;
       const readyCountdown = Math.min(10, Math.max(3, parseInt(document.getElementById("setting-ready-countdown").value, 10) || 5));
+      const movementProfile = document.getElementById("setting-movement-profile").value;
+      const newTeacherPin = document.getElementById("setting-pin").value.trim();
 
-      StorageManager.saveSettings({
+      const updatedSettings = {
         timerSeconds: timer,
         confidenceThreshold: conf,
         cooldownSeconds: cooldown,
         holdDurationSeconds: hold,
-        readyCountdownSeconds: readyCountdown
-      });
+        readyCountdownSeconds: readyCountdown,
+        movementProfile,
+        cooperativeGoal: Math.min(20, Math.max(3, parseInt(document.getElementById("setting-cooperative-goal").value, 10) || 7)),
+        largeText: document.getElementById("setting-large-text").checked,
+        highContrast: document.getElementById("setting-high-contrast").checked,
+        reducedMotion: document.getElementById("setting-reduced-motion").checked,
+        shuffleOptions: document.getElementById("setting-shuffle-options").checked,
+        basePoints: parseInt(document.getElementById("setting-base-points").value, 10) || 100
+      };
+      if (newTeacherPin) updatedSettings.teacherPin = newTeacherPin;
+      StorageManager.saveSettings(updatedSettings);
+      document.getElementById("setting-pin").value = "";
 
       this.gesture.setThresholds({
         confidence: conf,
         holdMs: hold * 1000,
         cooldownMs: cooldown * 1000
       });
+      this.gesture.setMovementProfile(movementProfile);
+
+      this.applyAccessibilitySettings();
 
       alert("Pengaturan kelas berhasil disimpan!");
     });
@@ -771,7 +835,10 @@ export class UIManager {
         explanation: document.getElementById("new-q-explanation").value.trim(),
         imageUrl,
         imageAlt: document.getElementById("new-q-image-alt").value.trim(),
-        gestureMap: { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" }
+        imageLayout: document.getElementById("new-q-image-layout").value,
+        gestureMap: StorageManager.getSettings().movementProfile === "hands_only"
+          ? { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "CROSS_ARMS" }
+          : { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" }
       };
 
       if (editId) {
@@ -844,6 +911,48 @@ export class UIManager {
       };
 
       reader.readAsText(file);
+    });
+
+    const csvInput = document.getElementById("import-csv-input");
+    csvInput?.addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ({ target }) => {
+        const result = StorageManager.importQuestionsFromCSV(target.result);
+        const feedbackBox = document.getElementById("import-feedback-box");
+        feedbackBox.classList.remove("hidden", "success", "error");
+        feedbackBox.classList.add(result.success ? "success" : "error");
+        feedbackBox.textContent = result.success
+          ? `✅ ${result.importedCount} soal berhasil diimpor dari CSV.`
+          : `⚠️ Impor CSV gagal: ${result.error}`;
+        if (result.success) this.renderCustomQuestionsList();
+        csvInput.value = "";
+      };
+      reader.readAsText(file);
+    });
+    document.getElementById("btn-download-csv-template")?.addEventListener("click", () => {
+      const headers = "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation\n";
+      const example = '"Berapa 6 x 7?",36,40,42,48,C,numerasi,4,medium,Perkalian,,,"6 x 7 = 42"\n';
+      const link = document.createElement("a");
+      link.href = `data:text/csv;charset=utf-8,${encodeURIComponent(headers + example)}`;
+      link.download = "template_soal_motion_smart_class.csv";
+      link.click();
+    });
+
+    document.getElementById("form-session-package")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      StorageManager.saveSessionPackage({
+        name: document.getElementById("package-name").value,
+        mode: document.getElementById("package-mode").value,
+        category: document.getElementById("package-category").value,
+        grade: document.getElementById("package-grade").value,
+        difficulty: document.getElementById("package-difficulty").value,
+        count: document.getElementById("package-count").value
+      });
+      event.currentTarget.reset();
+      document.getElementById("package-count").value = 8;
+      this.renderSessionPackages();
     });
 
     // Question Filters and Search
@@ -922,6 +1031,14 @@ export class UIManager {
     document.getElementById("setting-cooldown").value = settings.cooldownSeconds;
     document.getElementById("setting-hold").value = settings.holdDurationSeconds;
     document.getElementById("setting-ready-countdown").value = settings.readyCountdownSeconds;
+    document.getElementById("setting-base-points").value = settings.basePoints;
+    document.getElementById("setting-movement-profile").value = settings.movementProfile;
+    document.getElementById("setting-cooperative-goal").value = settings.cooperativeGoal;
+    document.getElementById("setting-large-text").checked = settings.largeText;
+    document.getElementById("setting-high-contrast").checked = settings.highContrast;
+    document.getElementById("setting-reduced-motion").checked = settings.reducedMotion;
+    document.getElementById("setting-shuffle-options").checked = settings.shuffleOptions;
+    this.applyAccessibilitySettings();
 
     // Cloud Firestore Events & Synchronization
     this.bindFirestoreEvents();
@@ -1049,7 +1166,7 @@ export class UIManager {
     const appEl = document.getElementById("msc-app");
 
     // Reparent cam-pip-container back to msc-app if transitioning away from CALIBRATION
-    if (state !== GAME_STATES.CALIBRATION) {
+    if (state !== GAME_STATES.CALIBRATION && state !== GAME_STATES.GESTURE_TRAINING) {
       if (appEl && camPip && camPip.parentElement !== appEl) {
         appEl.appendChild(camPip);
         if (this.videoEl) this.videoEl.play().catch(() => {});
@@ -1057,13 +1174,13 @@ export class UIManager {
     }
 
     // Manage camera visibility
-    if (state === GAME_STATES.CALIBRATION) {
+    if (state === GAME_STATES.CALIBRATION || state === GAME_STATES.GESTURE_TRAINING) {
       camPip.classList.remove("hidden");
       camPip.classList.add("calibration-view");
       guideBox.classList.remove("hidden");
       this.startCameraSession();
     } else if (state === GAME_STATES.QUESTION_ACTIVE || state === GAME_STATES.MULTIPLAYER_PLAYER_GAME) {
-      camPip.classList.remove("hidden");
+      camPip.classList.toggle("hidden", this.game.touchMode);
       camPip.classList.remove("calibration-view");
       guideBox.classList.add("hidden");
       this.startCameraSession();
@@ -1095,6 +1212,9 @@ export class UIManager {
         break;
       case GAME_STATES.CALIBRATION:
         this.renderCalibrationScreen(main);
+        break;
+      case GAME_STATES.GESTURE_TRAINING:
+        this.renderGestureTrainingScreen(main);
         break;
       case GAME_STATES.COUNTDOWN:
         this.renderCountdownScreen(main, payload.countdown);
@@ -1182,7 +1302,10 @@ export class UIManager {
     // Handle confirmed gesture
     if (gestureResult.confirmed) {
       this.audio.playBonus();
-      if (this.game.state === GAME_STATES.QUESTION_ACTIVE) {
+      if (this.game.state === GAME_STATES.GESTURE_TRAINING) {
+        this.trainingGestures.add(gestureResult.gesture);
+        this.updateGestureTrainingUI(gestureResult.gesture);
+      } else if (this.game.state === GAME_STATES.QUESTION_ACTIVE) {
         this.game.submitAnswerByGesture(gestureResult.gesture);
       } else if (this.game.state === GAME_STATES.MULTIPLAYER_PLAYER_GAME) {
         this.handleMultiplayerPlayerGesture(gestureResult.gesture);
@@ -1330,6 +1453,22 @@ export class UIManager {
             <p class="mode-desc">Bermain bersama seluruh siswa sekelas! Hubungkan HP siswa dengan layar guru &amp; bertanding langsung!</p>
             <button class="mode-play-btn" style="background: linear-gradient(135deg, #2563EB, #7C3AED); color: #FFFFFF;">Pusat Game Show 🌐</button>
           </div>
+
+          <div class="mode-card" id="mode-btn-training" style="border-top-color:#0F766E;">
+            <div class="mode-card-icon">🧍</div>
+            <div class="mode-card-badge">Pemanasan Aman</div>
+            <h3 class="mode-title">LATIHAN GERAK</h3>
+            <p class="mode-desc">Coba gerakan jawaban satu per satu dan pastikan kamera mengenalinya sebelum permainan dimulai.</p>
+            <button class="mode-play-btn" style="background:#0F766E;color:#fff;">Mulai Latihan</button>
+          </div>
+
+          <div class="mode-card" id="mode-btn-cooperative" style="border-top-color:#F2B84B;">
+            <div class="mode-card-icon">🤝</div>
+            <div class="mode-card-badge">Target Bersama</div>
+            <h3 class="mode-title">MISI SATU KELAS</h3>
+            <p class="mode-desc">Seluruh siswa bekerja sama mengejar target jawaban benar tanpa peringkat individu.</p>
+            <button class="mode-play-btn" style="background:#B7791F;color:#fff;">Mulai Misi Bersama</button>
+          </div>
         </div>
 
         <!-- REAL-TIME CLASSROOM TEAM LEADERBOARD -->
@@ -1407,6 +1546,17 @@ export class UIManager {
     document.getElementById("mode-btn-tf").addEventListener("click", () => {
       this.audio.playClick();
       this.game.startSessionConfig({ mode: GAME_MODES.TRUE_FALSE, category: "all" });
+    });
+
+    document.getElementById("mode-btn-training")?.addEventListener("click", () => {
+      this.audio.playClick();
+      this.trainingGestures.clear();
+      this.game.setState(GAME_STATES.GESTURE_TRAINING);
+    });
+
+    document.getElementById("mode-btn-cooperative")?.addEventListener("click", () => {
+      this.audio.playClick();
+      this.game.startSessionConfig({ mode: GAME_MODES.COOPERATIVE, category: "all" });
     });
 
     // Multiplayer Online buttons
@@ -2024,11 +2174,58 @@ export class UIManager {
     `;
   }
 
+  renderGestureTrainingScreen(container) {
+    const settings = StorageManager.getSettings();
+    const fourthLabel = settings.movementProfile === "hands_only" ? "Silang tangan" : "Jongkok";
+    container.innerHTML = `
+      <div class="gesture-training-screen animate-fade-in">
+        <button id="btn-training-back" class="back-link-btn">← Kembali</button>
+        <div class="training-header"><span class="ready-eyebrow">PEMANASAN SEBELUM BELAJAR</span><h2>Latihan Gerakan Jawaban</h2><p>Tahan setiap gerakan sampai kartu berubah hijau. Pastikan area di sekitarmu aman.</p></div>
+        <div id="training-camera-slot" class="training-camera-slot"></div>
+        <div class="training-grid">
+          ${[
+            [GESTURE_TYPES.A, "A", "✋", "Angkat tangan kiri"],
+            [GESTURE_TYPES.B, "B", "✋", "Angkat tangan kanan"],
+            [GESTURE_TYPES.C, "C", "🙌", "Angkat kedua tangan"],
+            [GESTURE_TYPES.D, "D", "🧘", fourthLabel]
+          ].map(([gesture, letter, icon, label]) => `<div class="training-card" data-training-gesture="${gesture}"><span>${icon}</span><strong>${letter}</strong><p>${label}</p><small>Belum terdeteksi</small></div>`).join("")}
+        </div>
+        <div id="training-progress" class="training-progress" aria-live="polite">0 dari 4 gerakan berhasil</div>
+        <button id="btn-training-finish" class="primary-btn" disabled>Selesai Latihan</button>
+      </div>
+    `;
+    document.getElementById("btn-training-back")?.addEventListener("click", () => this.game.setState(GAME_STATES.HOME));
+    document.getElementById("btn-training-finish")?.addEventListener("click", () => this.game.setState(GAME_STATES.HOME));
+    const camera = document.getElementById("cam-pip-container");
+    const slot = document.getElementById("training-camera-slot");
+    if (camera && slot) {
+      slot.append(camera);
+      camera.classList.remove("hidden");
+      camera.classList.add("calibration-view");
+      this.videoEl?.play().catch(() => {});
+    }
+  }
+
+  updateGestureTrainingUI(gesture) {
+    const card = document.querySelector(`[data-training-gesture="${gesture}"]`);
+    if (card) {
+      card.classList.add("complete");
+      card.querySelector("small").textContent = "✓ Terdeteksi dengan baik";
+    }
+    const count = [GESTURE_TYPES.A, GESTURE_TYPES.B, GESTURE_TYPES.C, GESTURE_TYPES.D]
+      .filter((item) => this.trainingGestures.has(item)).length;
+    const progress = document.getElementById("training-progress");
+    if (progress) progress.textContent = `${count} dari 4 gerakan berhasil`;
+    const finish = document.getElementById("btn-training-finish");
+    if (finish && count === 4) finish.disabled = false;
+  }
+
   renderQuestionImage(question, variant = "") {
     const imageUrl = safeImageUrl(question?.imageUrl);
     if (!imageUrl) return "";
     const alt = question?.imageAlt || "Gambar pendukung soal";
-    const className = variant ? `question-media ${variant}` : "question-media";
+    const layout = ["contain", "wide", "compact"].includes(question?.imageLayout) ? question.imageLayout : "contain";
+    const className = `question-media image-layout-${layout}${variant ? ` ${variant}` : ""}`;
     return `
       <figure class="${className}">
         <img src="${escapeHTML(imageUrl)}" alt="${escapeHTML(alt)}" loading="lazy" referrerpolicy="no-referrer" />
@@ -2055,9 +2252,13 @@ export class UIManager {
     const isArena = mode === GAME_MODES.ARENA;
     const isTeamBattle = mode === GAME_MODES.TEAM_BATTLE;
     const isAdventure = mode === GAME_MODES.ADVENTURE;
+    const isCooperative = mode === GAME_MODES.COOPERATIVE;
     const isTrueFalse = mode === GAME_MODES.TRUE_FALSE || question.isTrueFalse;
     const isBoss = mode === GAME_MODES.BOSS;
     const isDetective = mode === GAME_MODES.DETECTIVE || !!question.passage;
+    const fourthGestureText = StorageManager.getSettings().movementProfile === "hands_only"
+      ? "🙅 Silang Tangan di Dada"
+      : "🧘 Posisi Jongkok";
 
     const activeTeam = isTeamBattle && battleTeams && battleTeams.length > 0
       ? battleTeams[currentTeamTurn % battleTeams.length]
@@ -2136,6 +2337,13 @@ export class UIManager {
           </div>
         </div>
 
+        ${isCooperative ? `
+          <div class="cooperative-live-card">
+            <div><strong>🤝 Target Bersama Kelas</strong><span>${this.game.scoreEngine.correctCount} / ${StorageManager.getSettings().cooperativeGoal || 7} jawaban benar</span></div>
+            <div class="cooperative-progress-track"><span style="width:${Math.min(100, (this.game.scoreEngine.correctCount / (StorageManager.getSettings().cooperativeGoal || 7)) * 100)}%"></span></div>
+          </div>
+        ` : ""}
+
         <!-- BOSS HP BAR (If Boss Mode) -->
         ${
           isBoss
@@ -2197,7 +2405,7 @@ export class UIManager {
                   "✋ Jangkau Kiri Atas (Tangan Kiri)",
                   "✋ Jangkau Kanan Atas (Tangan Kanan)",
                   "🙌 Jangkau Kiri Bawah (Kedua Tangan)",
-                  "🧘 Jangkau Kanan Bawah (Jongkok)"
+                  fourthGestureText
                 ][optIdx];
 
                 return `
@@ -2237,7 +2445,7 @@ export class UIManager {
                         "✋ Tangan Kiri Diangkat",
                         "✋ Tangan Kanan Diangkat",
                         "🙌 Kedua Tangan Diangkat",
-                        "🧘 Posisi Jongkok"
+                        fourthGestureText
                       ][optIdx];
 
                       return `
@@ -2394,6 +2602,8 @@ export class UIManager {
     const isTeamBattle = mode === GAME_MODES.TEAM_BATTLE;
     const isBoss = mode === GAME_MODES.BOSS;
     const isAdventure = mode === GAME_MODES.ADVENTURE;
+    const isCooperative = mode === GAME_MODES.COOPERATIVE;
+    const cooperativeGoal = StorageManager.getSettings().cooperativeGoal || 7;
 
     container.innerHTML = `
       <div class="screen-result animate-fade-in">
@@ -2409,6 +2619,13 @@ export class UIManager {
                 : "Kamu telah menyelesaikan tantangan gerak dengan luar biasa!"
             }
           </p>
+
+          ${isCooperative ? `
+            <div class="cooperative-result-card">
+              <h3>${correct >= cooperativeGoal ? "🎉 Target kelas tercapai!" : "🌱 Sedikit lagi, kelas hebat!"}</h3>
+              <p>Kelas mengumpulkan <strong>${correct}</strong> jawaban benar dari target <strong>${cooperativeGoal}</strong>. Tidak ada peringkat individu dalam mode ini.</p>
+            </div>
+          ` : ""}
 
           <!-- Grand Score Counter -->
           <div class="result-score-box">
@@ -2531,7 +2748,7 @@ export class UIManager {
                           const isWeak = acc < 65;
                           return `
                         <tr>
-                          <td><strong>${tp}</strong> ${isWeak ? '<span style="color:#DC2626; font-size:0.75rem;">(Perlu Ditinjau)</span>' : "✓"}</td>
+                          <td><strong>${escapeHTML(tp)}</strong> ${isWeak ? '<span style="color:#DC2626; font-size:0.75rem;">(Perlu Ditinjau)</span>' : "✓"}</td>
                           <td>${data.correct}</td>
                           <td>${data.total}</td>
                           <td style="color:${isWeak ? "#DC2626" : "#15803D"}; font-weight:800;">${acc}%</td>
@@ -2554,7 +2771,7 @@ export class UIManager {
                 ? `
               <div style="margin-top:10px; background:#FEF2F2; border:1px solid #FCA5A5; padding:8px 14px; border-radius:6px; font-size:0.82rem; color:#991B1B;">
                 <strong>💡 Rekomendasi Guru:</strong> Siswa disarankan mengulang pembahasan pada topik: 
-                ${weakTopics.map((w) => `<u>${w.topic}</u>`).join(", ")}.
+                ${weakTopics.map((w) => `<u>${escapeHTML(w.topic)}</u>`).join(", ")}.
               </div>
             `
                 : `
@@ -2826,6 +3043,7 @@ export class UIManager {
     document.getElementById("new-q-passage").value = q.passage || "";
     document.getElementById("new-q-image-url").value = q.imageUrl || "";
     document.getElementById("new-q-image-alt").value = q.imageAlt || "";
+    document.getElementById("new-q-image-layout").value = q.imageLayout || "contain";
     document.getElementById("new-q-text").value = q.question || "";
     document.getElementById("new-q-opt-a").value = q.options && q.options[0] ? q.options[0] : "";
     document.getElementById("new-q-opt-b").value = q.options && q.options[1] ? q.options[1] : "";
@@ -2905,6 +3123,67 @@ export class UIManager {
     preview.append(image);
   }
 
+  applyAccessibilitySettings() {
+    const settings = StorageManager.getSettings();
+    const root = document.documentElement;
+    root.classList.toggle("access-large-text", !!settings.largeText);
+    root.classList.toggle("access-high-contrast", !!settings.highContrast);
+    root.classList.toggle("access-reduced-motion", !!settings.reducedMotion);
+  }
+
+  renderSessionPackages() {
+    const container = document.getElementById("session-packages-list");
+    if (!container) return;
+    const packages = StorageManager.getSessionPackages();
+    if (!packages.length) {
+      container.innerHTML = `<div class="empty-list-msg"><p>Belum ada paket sesi. Buat konfigurasi pertama melalui formulir di atas.</p></div>`;
+      return;
+    }
+    container.innerHTML = packages.map((pkg) => `
+      <article class="session-package-card">
+        <div><span class="q-badge-cat">${escapeHTML(pkg.category)} • Kelas ${pkg.grade}</span><h4>${escapeHTML(pkg.name)}</h4><p>${pkg.count} soal • ${escapeHTML(pkg.difficulty)} • ${escapeHTML(pkg.mode)}</p></div>
+        <div class="package-actions"><button class="primary-btn btn-sm package-run" data-id="${escapeHTML(pkg.id)}">▶ Jalankan</button><button class="danger-btn btn-sm package-delete" data-id="${escapeHTML(pkg.id)}">Hapus</button></div>
+      </article>
+    `).join("");
+    container.querySelectorAll(".package-run").forEach((button) => button.addEventListener("click", () => {
+      const pkg = StorageManager.getSessionPackages().find((item) => item.id === button.dataset.id);
+      if (!pkg) return;
+      this.closeTeacherModal();
+      this.game.startSavedSession(pkg);
+    }));
+    container.querySelectorAll(".package-delete").forEach((button) => button.addEventListener("click", () => {
+      StorageManager.deleteSessionPackage(button.dataset.id);
+      this.renderSessionPackages();
+    }));
+  }
+
+  renderMediaLibrary() {
+    const container = document.getElementById("media-library-grid");
+    if (!container) return;
+    const mediaMap = new Map();
+    this.getCombinedQuestionsList().forEach((question) => {
+      const url = safeImageUrl(question.imageUrl);
+      if (url && !mediaMap.has(url)) mediaMap.set(url, { url, alt: question.imageAlt || question.question, layout: question.imageLayout || "contain" });
+    });
+    const media = [...mediaMap.values()];
+    if (!media.length) {
+      container.innerHTML = `<div class="empty-list-msg"><p>Belum ada gambar. Tambahkan URL HTTPS melalui Editor Soal.</p></div>`;
+      return;
+    }
+    container.innerHTML = media.map((item, index) => `
+      <article class="media-library-card"><img src="${escapeHTML(item.url)}" alt="${escapeHTML(item.alt)}" loading="lazy" referrerpolicy="no-referrer" /><div><p>${escapeHTML(item.alt)}</p><button class="secondary-btn btn-sm media-use" data-index="${index}">Gunakan di soal</button></div></article>
+    `).join("");
+    container.querySelectorAll(".media-use").forEach((button) => button.addEventListener("click", () => {
+      const item = media[Number(button.dataset.index)];
+      document.getElementById("new-q-image-url").value = item.url;
+      document.getElementById("new-q-image-alt").value = item.alt;
+      document.getElementById("new-q-image-layout").value = item.layout;
+      this.updateQuestionImagePreview();
+      document.querySelectorAll(".modal-tabs .tab-btn").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === "tab-add-question"));
+      document.querySelectorAll(".tab-content").forEach((tab) => tab.classList.toggle("active", tab.id === "tab-add-question"));
+    }));
+  }
+
   async renderAnalyticsDashboard(forceFirestore = false) {
     const statsContainer = document.getElementById("analytics-summary-cards");
     const recContainer = document.getElementById("analytics-weak-recommendations");
@@ -2982,6 +3261,15 @@ export class UIManager {
       }
     });
 
+    const topicRows = Object.entries(topicAgg)
+      .map(([topic, data]) => ({ topic, ...data, accuracy: data.total ? Math.round((data.correct / data.total) * 100) : 0 }))
+      .sort((a, b) => a.accuracy - b.accuracy)
+      .map((item) => `<tr><td>${escapeHTML(item.topic)}</td><td>${item.correct}/${item.total}</td><td><strong>${item.accuracy}%</strong></td><td>${item.accuracy >= 80 ? "Dikuasai" : item.accuracy >= 65 ? "Berkembang" : "Perlu latihan"}</td></tr>`)
+      .join("");
+    const topicTable = topicRows
+      ? `<div class="topic-report-wrap"><h4>Laporan Semua Topik</h4><table class="topic-mastery-table"><thead><tr><th>Topik</th><th>Benar</th><th>Akurasi</th><th>Status</th></tr></thead><tbody>${topicRows}</tbody></table></div>`
+      : "";
+
     if (weakTopics.length > 0) {
       recContainer.innerHTML = `
         <h4>💡 Rekomendasi Materi yang Perlu Ditinjau Ulang di Kelas:</h4>
@@ -2990,16 +3278,18 @@ export class UIManager {
           ${weakTopics
             .map(
               (w) => `
-            <span class="weak-tag">⚠️ ${w.topic} (Akurasi: ${w.accuracy}%)</span>
+            <span class="weak-tag">⚠️ ${escapeHTML(w.topic)} (Akurasi: ${w.accuracy}%)</span>
           `
             )
             .join("")}
         </div>
+        ${topicTable}
       `;
     } else {
       recContainer.innerHTML = `
         <h4 style="color: #15803D;">🎉 Penguasaan Materi Kelas Sangat Baik!</h4>
         <p style="font-size: 0.85rem; color: #166534;">Belum ada topik yang menunjukkan tingkat kesulitan kritis. Siswa menguasai literasi dan numerasi dengan seimbang.</p>
+        ${topicTable}
       `;
     }
 

@@ -43,11 +43,22 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
+- **Paket Sesi:** Guru dapat menyimpan mode, kelas, kategori, kesulitan, dan jumlah soal sebagai template sekali klik.
+- **Impor CSV:** Mendukung pembuatan soal massal melalui template CSV yang dapat diunduh dari Teacher Studio.
+- **Pustaka Media:** Gambar dari bank soal terkumpul otomatis dan dapat digunakan kembali.
+- **Mode Presentasi Guru:** Paket sesi dapat dijalankan dalam mode sentuh tanpa kamera.
+- **Randomisasi Aman:** Pilihan jawaban dapat diacak tanpa mengubah kunci jawaban yang benar.
 - **Manajemen Skor Tim:** Atur nama dan skor awal tim kelas.
 
 ### 6. Fallback Mode (Touch Mode) & Privasi
 - **Privasi Terjamin:** Video kamera diproses 100% secara lokal di browser via MediaPipe/Canvas. Tidak ada wajah, foto, atau video yang disimpan maupun diunggah.
 - **Touch Mode Fallback:** Jika perangkat tidak memiliki kamera atau izin ditolak, siswa tetap dapat bermain secara lancar dengan menekan kartu pilihan di layar sentuh / mouse.
+- **Aksesibilitas:** Tersedia teks besar, kontras tinggi, pengurangan animasi, dan profil gerakan tangan tanpa jongkok.
+
+### 7. Latihan Gerak & Misi Kooperatif
+- **Latihan Gerak:** Siswa dapat menguji empat gerakan sampai seluruhnya terdeteksi sebelum bermain.
+- **Misi Satu Kelas:** Kelas mengejar target jawaban benar bersama tanpa peringkat individu.
+- **Laporan Topik:** Analitik menampilkan akurasi dan status penguasaan untuk semua topik, bukan hanya materi yang lemah.
 
 ---
 
@@ -77,7 +88,7 @@ motion-smart-class/
 │       └── UIManager.js        # Antarmuka layar, HUD, modal PIN, podium & konfeti
 ```
 
-### 7. Multiplayer Online Real-Time (Game Show Kelas) 🌐
+### 8. Multiplayer Online Real-Time (Game Show Kelas) 🌐
 - **Host Screen (Papan Interaktif / PID Guru):**
   - Guru membuka Room dengan kode PIN 6 karakter acak (misal: `MSC-8492`).
   - Menampilkan soal berukuran besar di depan kelas, status respons siswa live, dan grafik sebaran jawaban.
@@ -141,4 +152,10 @@ Gunakan URL HTTPS publik yang langsung mengarah ke file gambar. Pastikan guru me
     "imageAlt": "Lingkaran dengan setengah bagian berwarna biru"
   }
 ]
+```
+
+Untuk impor CSV, gunakan tombol **Template CSV**. Kolom yang didukung:
+
+```text
+question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation
 ```
