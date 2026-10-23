@@ -86,6 +86,35 @@ async function runTests() {
   assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
   console.log("✓ importQuestionsFromCSV: PASS");
 
+  const { createQuestionWorkbook, readQuestionWorkbook } = await import("../src/utils/questionSpreadsheet.js");
+  const excelFixture = [{
+    id: "excel-roundtrip-1",
+    question: "Berapakah setengah dari 10?",
+    options: ["2", "5", "8", "10"],
+    correctAnswer: 1,
+    category: "numerasi",
+    grade: 3,
+    difficulty: "easy",
+    topic: "Pembagian",
+    imageUrl: "https://images.example.edu/halves.png",
+    imageAlt: "Sepuluh benda dibagi dua kelompok",
+    imageLayout: "compact",
+    timeLimit: 35,
+    pointWeight: 120,
+    explanation: "Setengah dari sepuluh adalah lima."
+  }];
+  for (const format of ["xlsx", "xls"]) {
+    const workbookData = await createQuestionWorkbook(excelFixture, format);
+    const parsedExcel = await readQuestionWorkbook(workbookData);
+    assert.strictEqual(parsedExcel.length, 1);
+    assert.strictEqual(parsedExcel[0].question, excelFixture[0].question);
+    assert.deepStrictEqual(parsedExcel[0].options, excelFixture[0].options);
+    assert.strictEqual(parsedExcel[0].correctAnswer, 1);
+    assert.strictEqual(parsedExcel[0].grade, 3);
+    assert.strictEqual(parsedExcel[0].imageLayout, "compact");
+  }
+  console.log("✓ XLS/XLSX question workbook round-trip: PASS");
+
   const savedPackage = StorageManager.saveSessionPackage({ name: "Pecahan Kelas 4", mode: "cooperative", count: 10 });
   assert.strictEqual(savedPackage.mode, "cooperative");
   assert.ok(StorageManager.getSessionPackages().some((pkg) => pkg.id === savedPackage.id));

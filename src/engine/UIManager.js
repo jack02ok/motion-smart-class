@@ -24,6 +24,7 @@ import {
 import { DEFAULT_QUESTIONS } from "../data/defaultQuestions.js";
 import { MultiplayerEngine, ROOM_STATUS } from "./MultiplayerEngine.js";
 import firestoreRules from "../../firestore.rules?raw";
+import { createQuestionWorkbook, downloadWorkbook, readQuestionWorkbook } from "../utils/questionSpreadsheet.js";
 
 export class UIManager {
   constructor({ appContainer, gameEngine, cameraManager, poseDetector, gestureEngine, audioManager }) {
@@ -211,8 +212,14 @@ export class UIManager {
                       📊 Impor CSV
                       <input type="file" id="import-csv-input" accept=".csv,text/csv" style="display:none;" />
                     </label>
+                    <label class="secondary-btn btn-file-label" title="Impor bank soal Excel XLS atau XLSX">
+                      📗 Impor Excel
+                      <input type="file" id="import-excel-input" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;" />
+                    </label>
                     <button type="button" id="btn-download-csv-template" class="secondary-btn" title="Unduh format kolom CSV">Template CSV</button>
                     <button id="btn-export-questions" class="secondary-btn" title="Ekspor seluruh bank soal ke JSON">📤 Ekspor Soal (JSON)</button>
+                    <button type="button" id="btn-export-xlsx" class="secondary-btn" title="Ekspor bank soal ke Excel modern">📗 Ekspor XLSX</button>
+                    <button type="button" id="btn-export-xls" class="secondary-btn" title="Ekspor bank soal ke Excel 97–2003">📘 Ekspor XLS</button>
                     <button id="btn-switch-to-add" class="primary-btn" title="Buka form pembuatan soal baru">➕ Tambah Soal Baru</button>
                   </div>
                 </div>
@@ -939,6 +946,47 @@ export class UIManager {
       link.download = "template_soal_motion_smart_class.csv";
       link.click();
     });
+
+    const excelInput = document.getElementById("import-excel-input");
+    excelInput?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const feedbackBox = document.getElementById("import-feedback-box");
+      feedbackBox.classList.remove("hidden", "success", "error");
+      if (file.size > 10 * 1024 * 1024) {
+        feedbackBox.classList.add("error");
+        feedbackBox.textContent = "⚠️ File Excel terlalu besar. Maksimum 10 MB.";
+        excelInput.value = "";
+        return;
+      }
+      feedbackBox.textContent = "Membaca workbook Excel...";
+      try {
+        const questions = await readQuestionWorkbook(await file.arrayBuffer());
+        const result = StorageManager.importCustomQuestions(questions);
+        feedbackBox.classList.add(result.success ? "success" : "error");
+        feedbackBox.textContent = result.success
+          ? `✅ Impor Excel berhasil: ${result.importedCount} soal baru ditambahkan.`
+          : `⚠️ Impor Excel gagal: ${result.error}`;
+        if (result.success) this.renderCustomQuestionsList();
+      } catch (error) {
+        feedbackBox.classList.add("error");
+        feedbackBox.textContent = `⚠️ Workbook tidak dapat dibaca: ${error.message}`;
+      } finally {
+        excelInput.value = "";
+      }
+    });
+
+    const exportExcel = async (bookType) => {
+      try {
+        const questions = StorageManager.getCustomQuestions();
+        const workbookData = await createQuestionWorkbook(questions, bookType);
+        downloadWorkbook(workbookData, `soal_motion_smart_class.${bookType}`);
+      } catch (error) {
+        alert(`Ekspor Excel gagal: ${error.message}`);
+      }
+    };
+    document.getElementById("btn-export-xlsx")?.addEventListener("click", () => exportExcel("xlsx"));
+    document.getElementById("btn-export-xls")?.addEventListener("click", () => exportExcel("xls"));
 
     document.getElementById("form-session-package")?.addEventListener("submit", (event) => {
       event.preventDefault();

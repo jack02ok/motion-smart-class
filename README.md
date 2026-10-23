@@ -44,7 +44,7 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
 - **Paket Sesi:** Guru dapat menyimpan mode, kelas, kategori, kesulitan, dan jumlah soal sebagai template sekali klik.
-- **Impor CSV:** Mendukung pembuatan soal massal melalui template CSV yang dapat diunduh dari Teacher Studio.
+- **Impor/ekspor spreadsheet:** Mendukung pembuatan dan pemindahan bank soal melalui CSV, Excel 97–2003 (`.xls`), dan Excel modern (`.xlsx`).
 - **Pustaka Media:** Gambar dari bank soal terkumpul otomatis dan dapat digunakan kembali.
 - **Mode Presentasi Guru:** Paket sesi dapat dijalankan dalam mode sentuh tanpa kamera.
 - **Randomisasi Aman:** Pilihan jawaban dapat diacak tanpa mengubah kunci jawaban yang benar.
@@ -159,3 +159,9 @@ Untuk impor CSV, gunakan tombol **Template CSV**. Kolom yang didukung:
 ```text
 question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation
 ```
+
+## 📗 Impor dan ekspor Excel
+
+Teacher Studio menyediakan tombol **Impor Excel**, **Ekspor XLSX**, dan **Ekspor XLS**. Aplikasi membaca worksheet bernama `Soal`; jika nama tersebut tidak tersedia, worksheet pertama akan digunakan. Header tidak peka huruf besar/kecil dan urutan kolom boleh berubah.
+
+Workbook hasil ekspor memuat pertanyaan, empat pilihan, kunci jawaban A–D, kategori, kelas, kesulitan, topik, bacaan, gambar, waktu, bobot skor, dan pembahasan. Batas impor adalah 10 MB dan 5.000 baris soal per workbook.
