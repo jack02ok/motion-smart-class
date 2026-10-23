@@ -1,3 +1,5 @@
+import { FirestoreManager } from "./FirestoreManager.js";
+
 /**
  * MOTION SMART CLASS - Game Engine
  * State machine managing game modes, countdowns, rounds, feedback, and progression.
@@ -25,7 +27,8 @@ export const GAME_STATES = {
   MULTIPLAYER_HOST_GAME: "MULTIPLAYER_HOST_GAME",
   MULTIPLAYER_PLAYER_GAME: "MULTIPLAYER_PLAYER_GAME",
   MULTIPLAYER_ROUND_RESULT: "MULTIPLAYER_ROUND_RESULT",
-  MULTIPLAYER_PODIUM: "MULTIPLAYER_PODIUM"
+  MULTIPLAYER_PODIUM: "MULTIPLAYER_PODIUM",
+  GESTURE_TRAINING: "GESTURE_TRAINING"
 };
 
 export const GAME_MODES = {
@@ -38,7 +41,9 @@ export const GAME_MODES = {
   ARENA: "arena",           // Tahap 3: Motion Arena (Zone-based)
   ADVENTURE: "adventure",   // Tahap 4: Adventure Learning
   TEAM_BATTLE: "team_battle", // Tahap 5: Team Battle 2-4 teams
-  ONLINE_ROOM: "online_room"  // Online Multiplayer Classroom Game Show
+  ONLINE_ROOM: "online_room",  // Online Multiplayer Classroom Game Show
+  COOPERATIVE: "cooperative",
+  PRESENTATION: "presentation"
 };
 
 export const ADVENTURE_STAGES = [
@@ -150,6 +155,7 @@ export class GameEngine {
 
     // Touch Mode toggle
     this.touchMode = false;
+    this.sessionQuestionCount = null;
 
     // Callbacks for UI updates
     this.onStateChange = null;
@@ -208,6 +214,21 @@ export class GameEngine {
     this.setState(GAME_STATES.GRADE_SELECT);
   }
 
+  startSavedSession(config = {}) {
+    this.selectedMode = config.mode || GAME_MODES.QUICK_QUIZ;
+    this.selectedCategory = config.category || "all";
+    this.selectedGrade = config.grade || 4;
+    this.selectedDifficulty = config.difficulty || "all";
+    this.sessionQuestionCount = Math.min(20, Math.max(3, Number(config.count) || 8));
+    if (this.selectedMode === GAME_MODES.PRESENTATION) {
+      this.touchMode = true;
+      this.prepareQuestions();
+      this.startCountdown();
+      return;
+    }
+    this.setState(GAME_STATES.CALIBRATION);
+  }
+
   setupTeamBattle({ teamCount = 4 }) {
     this.selectedTeamCount = teamCount;
     const allTeams = this.storage.getTeams();
@@ -250,7 +271,7 @@ export class GameEngine {
   }
 
   prepareQuestions() {
-    let count = 8;
+    let count = this.sessionQuestionCount || 8;
     if (this.selectedMode === GAME_MODES.BOSS) {
       count = 5;
     } else if (this.selectedMode === GAME_MODES.ADVENTURE) {
@@ -259,6 +280,8 @@ export class GameEngine {
       count = 6;
     } else if (this.selectedMode === GAME_MODES.TEAM_BATTLE) {
       count = Math.max(6, this.battleTeams.length * 2);
+    } else if (this.selectedMode === GAME_MODES.COOPERATIVE) {
+      count = this.sessionQuestionCount || 10;
     }
 
     if (this.selectedMode === GAME_MODES.ADVENTURE && this.adventureStage === 4) {
@@ -274,12 +297,14 @@ export class GameEngine {
     }
 
     this.currentQuestionIndex = 0;
+    this.sessionQuestionCount = null;
     this.scoreEngine.reset();
   }
 
   startCountdown() {
     this.setState(GAME_STATES.COUNTDOWN);
-    let count = 3;
+    const configuredSeconds = Number(this.storage.getSettings()?.readyCountdownSeconds);
+    let count = Math.min(10, Math.max(3, Number.isFinite(configuredSeconds) ? configuredSeconds : 5));
     this.audio.playCountdownTick();
 
     if (this.onStateChange) {
@@ -533,7 +558,7 @@ export class GameEngine {
     const weakTopics = this.scoreEngine.getWeakTopics();
 
     // Record session learning analytics
-    this.storage.recordSessionAnalytics({
+    const sessionEntry = this.storage.recordSessionAnalytics({
       mode: this.selectedMode,
       category: this.selectedCategory,
       grade: this.selectedGrade,
@@ -546,6 +571,11 @@ export class GameEngine {
       topicMastery: this.scoreEngine.topicStats,
       weakTopics
     });
+    if (sessionEntry) {
+      FirestoreManager.recordGameSession(sessionEntry, { saveLocal: false }).catch((error) => {
+        console.warn("[GameEngine] Firestore analytics sync failed:", error);
+      });
+    }
 
     const badge = this.scoreEngine.getBadge(this.selectedCategory);
     const level = this.scoreEngine.getLevel();

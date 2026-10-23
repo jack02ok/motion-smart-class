@@ -4,6 +4,7 @@
  */
 
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
 
 // Mock localStorage for node environment
 globalThis.localStorage = (() => {
@@ -22,6 +23,7 @@ async function runTests() {
   // 1. Test StorageManager CRUD
   console.log("\n[1] Testing StorageManager (Tahap 2 Teacher Studio)...");
   const { StorageManager } = await import("../src/engine/StorageManager.js");
+  assert.strictEqual(StorageManager.getSettings().readyCountdownSeconds, 5, "Default movement preparation must be 5 seconds");
 
   // Save new question
   const q1 = StorageManager.saveCustomQuestion({
@@ -63,13 +65,32 @@ async function runTests() {
       options: ["Surabaya", "Bandung", "Jakarta / IKN", "Medan"],
       correctAnswer: 2,
       timeLimit: 30,
-      pointWeight: 100
+      pointWeight: 100,
+      imageUrl: "https://images.example.edu/indonesia-map.png",
+      imageAlt: "Peta Indonesia"
     }
   ];
   const importResult = StorageManager.importCustomQuestions(validImportData);
   assert.strictEqual(importResult.success, true);
   assert.strictEqual(importResult.importedCount, 1);
+  const importedQuestion = StorageManager.getCustomQuestions().find((question) => question.topic === "Wawasan Nusantara");
+  assert.strictEqual(importedQuestion.imageUrl, "https://images.example.edu/indonesia-map.png");
+  assert.strictEqual(importedQuestion.imageAlt, "Peta Indonesia");
   console.log("✓ importCustomQuestions (Valid JSON): PASS");
+
+  const csvResult = StorageManager.importQuestionsFromCSV([
+    "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation",
+    '"Hasil 5 + 5?",8,9,10,11,C,numerasi,2,easy,Penjumlahan,,,"Lima ditambah lima"'
+  ].join("\n"));
+  assert.strictEqual(csvResult.success, true);
+  assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
+  console.log("✓ importQuestionsFromCSV: PASS");
+
+  const savedPackage = StorageManager.saveSessionPackage({ name: "Pecahan Kelas 4", mode: "cooperative", count: 10 });
+  assert.strictEqual(savedPackage.mode, "cooperative");
+  assert.ok(StorageManager.getSessionPackages().some((pkg) => pkg.id === savedPackage.id));
+  StorageManager.deleteSessionPackage(savedPackage.id);
+  console.log("✓ session package persistence: PASS");
 
   // Import Invalid JSON
   const invalidImportResult = StorageManager.importCustomQuestions([
@@ -83,10 +104,27 @@ async function runTests() {
   assert.ok(!remaining.some((q) => q.id === q1.id), "Deleted question should not exist");
   console.log("✓ deleteCustomQuestion: PASS");
 
+  const { escapeHTML, cleanText, safeColor, safeImageUrl } = await import("../src/utils/security.js");
+  assert.strictEqual(escapeHTML('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+  assert.strictEqual(cleanText("Nama\u0000 Siswa", 20), "Nama Siswa");
+  assert.strictEqual(safeColor("red; background:url(x)"), "#64748B");
+  assert.strictEqual(safeImageUrl("javascript:alert(1)"), "");
+  assert.strictEqual(safeImageUrl("https://cdn.example.edu/question.png"), "https://cdn.example.edu/question.png");
+  console.log("✓ HTML escaping & input hardening: PASS");
+
+  const firestoreRules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  assert.ok(!firestoreRules.includes("allow read: if true"), "Firestore must not expose public reads");
+  assert.ok(!firestoreRules.includes("allow write: if true"), "Firestore must not expose public writes");
+  assert.ok(firestoreRules.includes("msc_room_secrets"), "Answer keys need a teacher-only collection");
+  assert.ok(firestoreRules.includes("isOwnPlayerUpdate"), "Player updates must be scoped to their Firebase UID");
+  console.log("✓ Firestore security invariants: PASS");
+
   // 2. Test QuestionEngine
   console.log("\n[2] Testing QuestionEngine...");
   const { QuestionEngine } = await import("../src/engine/QuestionEngine.js");
   const qEngine = new QuestionEngine();
+  const optionShuffle = qEngine.shuffleQuestionOptions({ options: ["A", "B", "C", "D"], correctAnswer: 2 });
+  assert.strictEqual(optionShuffle.options[optionShuffle.correctAnswer], "C", "Shuffling must preserve the answer key");
 
   const numQuestions = qEngine.getQuestions({ category: "numerasi", grade: 4, count: 5 });
   assert.ok(numQuestions.length > 0, "Should return numerasi questions");
@@ -218,6 +256,17 @@ async function runTests() {
   const resSquat = gestureEngine.classifyPose(landmarksSquat);
   assert.strictEqual(resSquat.gesture, GESTURE_TYPES.D, "Gesture D is Squat");
   console.log("✓ Gesture D (Squat Position): PASS");
+
+  gestureEngine.setMovementProfile("hands_only");
+  const crossedArms = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+  crossedArms[0] = { x: 0.5, y: 0.25, visibility: 0.9 };
+  crossedArms[11] = { x: 0.62, y: 0.42, visibility: 0.9 };
+  crossedArms[12] = { x: 0.38, y: 0.42, visibility: 0.9 };
+  crossedArms[15] = { x: 0.39, y: 0.43, visibility: 0.9 };
+  crossedArms[16] = { x: 0.61, y: 0.43, visibility: 0.9 };
+  assert.strictEqual(gestureEngine.classifyPose(crossedArms).gesture, GESTURE_TYPES.D, "Crossed arms must replace squat in hands-only mode");
+  gestureEngine.setMovementProfile("standard");
+  console.log("✓ accessible hands-only movement profile: PASS");
 
   // 5. Test Tahap 3: Motion Arena Zone Classification & Distance Estimation
   console.log("\n[5] Testing Tahap 3: Motion Arena Zones & Distance Calibration...");
@@ -410,6 +459,8 @@ async function runTests() {
       question: "25 + 75 = ?",
       options: ["90", "100", "110", "120"],
       correctAnswer: 1, // 'B'
+      imageUrl: "https://images.example.edu/number-blocks.png",
+      imageAlt: "Balok angka 25 dan 75",
       timeLimit: 30
     },
     {
@@ -433,6 +484,11 @@ async function runTests() {
   assert.ok(room.roomCode, "Room code should exist");
   assert.strictEqual(room.status, ROOM_STATUS.LOBBY);
   assert.strictEqual(room.questions.length, 2);
+  assert.strictEqual(room.questions[0].correctAnswer, undefined, "Answer key must not be exposed in public room data");
+  assert.strictEqual(room.questions[0].imageUrl, "https://images.example.edu/number-blocks.png", "Question image must be available to players");
+  assert.strictEqual(room.settings.readyCountdownSeconds, 5, "Multiplayer must default to a 5-second preparation");
+  assert.strictEqual(room.countdownSec, 5);
+  assert.strictEqual(hostEngine.hostQuestions[0].correctAnswer, 1, "Host keeps the protected answer key");
   assert.strictEqual(hostEngine.isHost, true);
   console.log("✓ hostEngine.createRoom: PASS");
 
@@ -458,10 +514,9 @@ async function runTests() {
   // Student submits answer ('B' is correct for Q1)
   const answerRes = await studentEngine.submitAnswer("B");
   assert.strictEqual(answerRes.success, true);
-  assert.strictEqual(answerRes.isCorrect, true);
-  assert.ok(answerRes.pointsEarned >= 100, "Points earned should include base 100 + speed bonus");
-  assert.strictEqual(answerRes.streak, 1);
-  console.log("✓ studentEngine.submitAnswer (Correct Answer & Speed Bonus): PASS");
+  assert.strictEqual(answerRes.pending, true);
+  assert.strictEqual(answerRes.isCorrect, undefined, "Student must not receive correctness before host closes the round");
+  console.log("✓ studentEngine.submitAnswer (Private/Pending): PASS");
 
   // Duplicate answer rejected
   const dupRes = await studentEngine.submitAnswer("A");
@@ -469,11 +524,17 @@ async function runTests() {
   assert.strictEqual(dupRes.alreadyAnswered, true);
   console.log("✓ Duplicate answer prevention in same round: PASS");
 
+  // Host performs authoritative scoring and only then publishes the answer.
+  hostEngine.currentRoom = hostEngine._getRoomLocally(room.roomCode);
+  await hostEngine.advanceToRoundResult();
+  assert.strictEqual(hostEngine.currentRoom.questions[0].correctAnswer, 1);
+
   // Leaderboard sorting
   const lb = hostEngine.getLeaderboard();
   assert.ok(Array.isArray(lb));
   assert.strictEqual(lb[0].name, "Rian");
   assert.ok(lb[0].score > 0);
+  assert.strictEqual(lb[0].isCorrect, true);
   console.log("✓ hostEngine.getLeaderboard: PASS");
 
   // Answer distribution

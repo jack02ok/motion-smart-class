@@ -113,11 +113,22 @@ export class QuestionEngine {
     }
 
     const shuffled = this.shuffle(pool);
-    return shuffled.slice(0, Math.min(count, shuffled.length)).map((q) => ({
-      ...q,
-      timeLimit: q.timeLimit || 40,
-      pointWeight: q.pointWeight || 100
-    }));
+    const shouldShuffleOptions = StorageManager.getSettings().shuffleOptions;
+    return shuffled.slice(0, Math.min(count, shuffled.length)).map((q) => {
+      const normalized = { ...q, timeLimit: q.timeLimit || 40, pointWeight: q.pointWeight || 100 };
+      return shouldShuffleOptions ? this.shuffleQuestionOptions(normalized) : normalized;
+    });
+  }
+
+  shuffleQuestionOptions(question) {
+    if (!Array.isArray(question.options) || question.options.length < 2) return question;
+    const choices = question.options.map((text, index) => ({ text, isCorrect: index === question.correctAnswer }));
+    const shuffled = this.shuffle(choices);
+    return {
+      ...question,
+      options: shuffled.map((choice) => choice.text),
+      correctAnswer: shuffled.findIndex((choice) => choice.isCorrect)
+    };
   }
 
   shuffle(array) {

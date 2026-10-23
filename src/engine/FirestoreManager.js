@@ -20,8 +20,9 @@ import {
   limit,
   writeBatch
 } from "firebase/firestore";
-import { getDb, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
+import { getDb, getCurrentUser, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
 import { StorageManager } from "./StorageManager.js";
+import { cleanText, safeImageUrl } from "../utils/security.js";
 
 const QUESTIONS_COLLECTION = "questions";
 const SESSIONS_COLLECTION = "game_sessions";
@@ -126,6 +127,9 @@ export class FirestoreManager {
       options: Array.isArray(question.options) ? question.options.map(String) : [],
       correctAnswer: typeof question.correctAnswer === "number" ? question.correctAnswer : 0,
       explanation: (question.explanation || "").trim(),
+      imageUrl: safeImageUrl(question.imageUrl),
+      imageAlt: cleanText(question.imageAlt || question.question, 160),
+      imageLayout: ["contain", "wide", "compact"].includes(question.imageLayout) ? question.imageLayout : "contain",
       timeLimit: parseInt(question.timeLimit, 10) || 40,
       pointWeight: parseInt(question.pointWeight, 10) || 100,
       gestureMap: question.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
@@ -165,6 +169,9 @@ export class FirestoreManager {
     const updatePayload = {
       ...updatedData,
       id,
+      imageUrl: safeImageUrl(updatedData.imageUrl),
+      imageAlt: cleanText(updatedData.imageAlt || updatedData.question, 160),
+      imageLayout: ["contain", "wide", "compact"].includes(updatedData.imageLayout) ? updatedData.imageLayout : "contain",
       updatedAt: new Date().toISOString()
     };
 
@@ -191,15 +198,6 @@ export class FirestoreManager {
    * Delete a question from Firestore and local storage
    */
   static async deleteQuestion(id) {
-    // Mirror to localStorage
-    StorageManager.deleteCustomQuestion(id);
-
-    // Update cached firestore questions
-    const cached = this.getCachedFirestoreQuestions().filter((q) => q.id !== id);
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(FIRESTORE_CACHE_KEY, JSON.stringify(cached));
-    }
-
     const status = this.getStatus();
     if (status.isConfigured) {
       try {
@@ -210,7 +208,14 @@ export class FirestoreManager {
         }
       } catch (err) {
         console.error("[Firestore] Error deleting question from Firestore:", err);
+        return false;
       }
+    }
+
+    StorageManager.deleteCustomQuestion(id);
+    const cached = this.getCachedFirestoreQuestions().filter((q) => q.id !== id);
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(FIRESTORE_CACHE_KEY, JSON.stringify(cached));
     }
 
     return true;
@@ -275,7 +280,7 @@ export class FirestoreManager {
    * Record a completed game session into Firestore & LocalStorage
    * Ensures strict student privacy (numerical metrics only, zero camera/biometric data).
    */
-  static async recordGameSession(sessionData) {
+  static async recordGameSession(sessionData, { saveLocal = true } = {}) {
     const cleanSession = {
       id: sessionData.id || "sess-" + Date.now(),
       date: sessionData.date || new Date().toISOString(),
@@ -294,6 +299,7 @@ export class FirestoreManager {
       teamId: sessionData.teamId || null,
       source: "app"
     };
+    cleanSession.ownerUid = getCurrentUser()?.uid || null;
 
     // PRIVACY ENFORCEMENT: Explicitly delete any accidental raw camera or landmark fields
     delete cleanSession.videoStream;
@@ -302,15 +308,17 @@ export class FirestoreManager {
     delete cleanSession.cameraFrame;
 
     // Save to LocalStorage immediately
-    try {
-      const history = StorageManager.getAnalyticsHistory();
-      history.unshift(cleanSession);
-      if (history.length > 50) history.pop();
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
+    if (saveLocal) {
+      try {
+        const history = StorageManager.getAnalyticsHistory();
+        history.unshift(cleanSession);
+        if (history.length > 50) history.pop();
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
+        }
+      } catch (e) {
+        console.warn("Failed to save session locally:", e);
       }
-    } catch (e) {
-      console.warn("Failed to save session locally:", e);
     }
 
     // Save to Firestore asynchronously
@@ -370,15 +378,6 @@ export class FirestoreManager {
    * Delete a game session from Firestore and local cache
    */
   static async deleteGameSession(sessionId) {
-    try {
-      const history = StorageManager.getAnalyticsHistory().filter((s) => s.id !== sessionId);
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-
     const status = this.getStatus();
     if (status.isConfigured) {
       try {
@@ -389,7 +388,16 @@ export class FirestoreManager {
         }
       } catch (err) {
         console.error("[Firestore] Error deleting session in Firestore:", err);
+        return false;
       }
+    }
+    try {
+      const history = StorageManager.getAnalyticsHistory().filter((s) => s.id !== sessionId);
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
+      }
+    } catch (e) {
+      console.warn(e);
     }
     return true;
   }

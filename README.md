@@ -37,15 +37,28 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - Mendukung 4 Tim: 🔴 Tim Merah, 🔵 Tim Biru, 🟢 Tim Hijau, 🟡 Tim Kuning.
 - Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
 
-### 5. Mode Guru (Teacher Mode - PIN: `1234`)
-- **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, dan durasi *hold/cooldown*.
-- **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru (disimpan permanen di LocalStorage).
-- **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON.
+### 5. Mode Guru (Teacher Mode)
+- Pada penggunaan lokal, PIN dibuat saat Mode Guru dibuka pertama kali dan disimpan hanya di browser perangkat tersebut.
+- Pada penggunaan Cloud Firestore, operasi cloud guru memerlukan Firebase Authentication dan profil role `teacher`; PIN lokal bukan pengganti autentikasi cloud.
+- **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
+- **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
+- **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
+- **Paket Sesi:** Guru dapat menyimpan mode, kelas, kategori, kesulitan, dan jumlah soal sebagai template sekali klik.
+- **Impor CSV:** Mendukung pembuatan soal massal melalui template CSV yang dapat diunduh dari Teacher Studio.
+- **Pustaka Media:** Gambar dari bank soal terkumpul otomatis dan dapat digunakan kembali.
+- **Mode Presentasi Guru:** Paket sesi dapat dijalankan dalam mode sentuh tanpa kamera.
+- **Randomisasi Aman:** Pilihan jawaban dapat diacak tanpa mengubah kunci jawaban yang benar.
 - **Manajemen Skor Tim:** Atur nama dan skor awal tim kelas.
 
 ### 6. Fallback Mode (Touch Mode) & Privasi
 - **Privasi Terjamin:** Video kamera diproses 100% secara lokal di browser via MediaPipe/Canvas. Tidak ada wajah, foto, atau video yang disimpan maupun diunggah.
 - **Touch Mode Fallback:** Jika perangkat tidak memiliki kamera atau izin ditolak, siswa tetap dapat bermain secara lancar dengan menekan kartu pilihan di layar sentuh / mouse.
+- **Aksesibilitas:** Tersedia teks besar, kontras tinggi, pengurangan animasi, dan profil gerakan tangan tanpa jongkok.
+
+### 7. Latihan Gerak & Misi Kooperatif
+- **Latihan Gerak:** Siswa dapat menguji empat gerakan sampai seluruhnya terdeteksi sebelum bermain.
+- **Misi Satu Kelas:** Kelas mengejar target jawaban benar bersama tanpa peringkat individu.
+- **Laporan Topik:** Analitik menampilkan akurasi dan status penguasaan untuk semua topik, bukan hanya materi yang lemah.
 
 ---
 
@@ -75,7 +88,7 @@ motion-smart-class/
 │       └── UIManager.js        # Antarmuka layar, HUD, modal PIN, podium & konfeti
 ```
 
-### 7. Multiplayer Online Real-Time (Game Show Kelas) 🌐
+### 8. Multiplayer Online Real-Time (Game Show Kelas) 🌐
 - **Host Screen (Papan Interaktif / PID Guru):**
   - Guru membuka Room dengan kode PIN 6 karakter acak (misal: `MSC-8492`).
   - Menampilkan soal berukuran besar di depan kelas, status respons siswa live, dan grafik sebaran jawaban.
@@ -91,6 +104,8 @@ motion-smart-class/
 
 ## 💻 Cara Menjalankan
 
+Gunakan Node.js 22 atau versi LTS yang kompatibel.
+
 ### 1. Jalankan Dev Server
 ```bash
 cd motion-smart-class
@@ -102,4 +117,45 @@ Buka browser di: `http://localhost:5173/`
 ```bash
 npm run build
 npm run preview
+```
+
+### 3. Test dan pemeriksaan produksi
+
+```bash
+npm ci
+npm run check
+```
+
+## 🔐 Konfigurasi Firebase yang aman
+
+1. Aktifkan **Email/Password** dan **Anonymous** di Firebase Authentication.
+2. Buat akun guru melalui Firebase Console.
+3. Buat dokumen `users/{uid-guru}` dengan field `role` bernilai `teacher`. Dokumen role tidak dapat dibuat atau diubah oleh client.
+4. Deploy `firestore.rules` dari repository ini.
+5. Aktifkan Firebase App Check untuk deployment produksi.
+
+Perangkat siswa masuk secara anonim dan UID Firebase digunakan sebagai identitas pemain. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban. Kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca akun guru.
+
+> Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. PIN lokal hanya mengunci tampilan pada satu browser dan bukan mekanisme otorisasi server.
+
+## 🖼️ Format gambar pada soal ekspor/impor
+
+Gunakan URL HTTPS publik yang langsung mengarah ke file gambar. Pastikan guru memiliki izin penggunaan gambarnya dan isi `imageAlt` agar materi tetap mudah dipahami siswa yang memakai pembaca layar.
+
+```json
+[
+  {
+    "question": "Perhatikan diagram. Pecahan berapa yang diarsir?",
+    "options": ["1/4", "1/2", "3/4", "1"],
+    "correctAnswer": 1,
+    "imageUrl": "https://contoh.sch.id/media/diagram-pecahan.png",
+    "imageAlt": "Lingkaran dengan setengah bagian berwarna biru"
+  }
+]
+```
+
+Untuk impor CSV, gunakan tombol **Template CSV**. Kolom yang didukung:
+
+```text
+question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation
 ```

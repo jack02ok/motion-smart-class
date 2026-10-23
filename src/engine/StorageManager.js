@@ -1,3 +1,5 @@
+import { cleanText, safeImageUrl } from "../utils/security.js";
+
 /**
  * MOTION SMART CLASS - Storage Manager
  * Comprehensive LocalStorage management for Settings, Custom Questions, Team scores, Analytics & Badges.
@@ -9,18 +11,26 @@ const TEAMS_KEY = "MSC_TEAMS";
 const STATS_KEY = "MSC_STATS";
 const ANALYTICS_KEY = "MSC_ANALYTICS_HISTORY";
 const ADVENTURE_KEY = "MSC_ADVENTURE_PROGRESS";
+const SESSION_PACKAGES_KEY = "MSC_SESSION_PACKAGES";
 
 const DEFAULT_SETTINGS = {
   soundEnabled: true,
   timerSeconds: 40,
+  readyCountdownSeconds: 5,
   confidenceThreshold: 0.60,
   cooldownSeconds: 1.2,
   holdDurationSeconds: 0.45,
   showSkeleton: true,
   debugMode: false,
   cameraEnabled: true,
+  highContrast: false,
+  largeText: false,
+  reducedMotion: false,
+  movementProfile: "standard",
+  shuffleOptions: false,
+  cooperativeGoal: 7,
   preferredCameraId: "user",
-  teacherPin: "1234",
+  teacherPin: "",
   basePoints: 100,
   speedBonusEnabled: true,
   comboMultiplierEnabled: true
@@ -55,6 +65,85 @@ export class StorageManager {
     }
   }
 
+  static getSessionPackages() {
+    try {
+      const data = localStorage.getItem(SESSION_PACKAGES_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveSessionPackage(pkg) {
+    const packages = this.getSessionPackages();
+    const item = {
+      id: pkg.id || `package-${Date.now()}`,
+      name: cleanText(pkg.name || "Paket Belajar", 80),
+      category: ["numerasi", "literasi", "all"].includes(pkg.category) ? pkg.category : "all",
+      grade: Math.min(6, Math.max(1, parseInt(pkg.grade, 10) || 4)),
+      difficulty: ["easy", "medium", "hard", "all"].includes(pkg.difficulty) ? pkg.difficulty : "all",
+      mode: ["quick_quiz", "detective", "cooperative", "presentation"].includes(pkg.mode) ? pkg.mode : "quick_quiz",
+      count: Math.min(20, Math.max(3, parseInt(pkg.count, 10) || 8)),
+      updatedAt: new Date().toISOString()
+    };
+    const index = packages.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) packages[index] = item;
+    else packages.unshift(item);
+    localStorage.setItem(SESSION_PACKAGES_KEY, JSON.stringify(packages));
+    return item;
+  }
+
+  static deleteSessionPackage(id) {
+    const packages = this.getSessionPackages().filter((entry) => entry.id !== id);
+    localStorage.setItem(SESSION_PACKAGES_KEY, JSON.stringify(packages));
+    return packages;
+  }
+
+  static importQuestionsFromCSV(csvText) {
+    const rows = String(csvText || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter((row) => row.trim());
+    if (rows.length < 2) return { success: false, importedCount: 0, error: "CSV tidak memiliki baris data." };
+
+    const parseRow = (row) => {
+      const cells = [];
+      let value = "";
+      let quoted = false;
+      for (let i = 0; i < row.length; i++) {
+        const char = row[i];
+        if (char === '"' && quoted && row[i + 1] === '"') { value += '"'; i++; }
+        else if (char === '"') quoted = !quoted;
+        else if (char === "," && !quoted) { cells.push(value.trim()); value = ""; }
+        else value += char;
+      }
+      cells.push(value.trim());
+      return cells;
+    };
+
+    const headers = parseRow(rows[0]).map((header) => header.toLowerCase());
+    const required = ["question", "optiona", "optionb", "optionc", "optiond", "correctanswer"];
+    if (!required.every((header) => headers.includes(header))) {
+      return { success: false, importedCount: 0, error: `Kolom wajib: ${required.join(", ")}.` };
+    }
+    const valueAt = (cells, key) => cells[headers.indexOf(key)] || "";
+    const questions = rows.slice(1).map((row) => {
+      const cells = parseRow(row);
+      const answerRaw = valueAt(cells, "correctanswer").toUpperCase();
+      const correctAnswer = /^[ABCD]$/.test(answerRaw) ? answerRaw.charCodeAt(0) - 65 : Number(answerRaw) || 0;
+      return {
+        question: valueAt(cells, "question"),
+        options: ["optiona", "optionb", "optionc", "optiond"].map((key) => valueAt(cells, key)),
+        correctAnswer,
+        category: valueAt(cells, "category") || "numerasi",
+        grade: valueAt(cells, "grade") || 4,
+        difficulty: valueAt(cells, "difficulty") || "medium",
+        topic: valueAt(cells, "topic") || "Materi Umum",
+        imageUrl: valueAt(cells, "imageurl"),
+        imageAlt: valueAt(cells, "imagealt"),
+        explanation: valueAt(cells, "explanation")
+      };
+    });
+    return this.importCustomQuestions(questions);
+  }
+
   // ==========================================
   // CUSTOM QUESTIONS CRUD
   // ==========================================
@@ -73,6 +162,9 @@ export class StorageManager {
       const newQuestion = {
         ...question,
         id: question.id || "custom-" + Date.now(),
+        imageUrl: safeImageUrl(question.imageUrl),
+        imageAlt: cleanText(question.imageAlt || question.question, 160),
+        imageLayout: ["contain", "wide", "compact"].includes(question.imageLayout) ? question.imageLayout : "contain",
         timeLimit: parseInt(question.timeLimit, 10) || 40,
         pointWeight: parseInt(question.pointWeight, 10) || 100,
         createdAt: question.createdAt || new Date().toISOString(),
@@ -97,6 +189,9 @@ export class StorageManager {
         ...questions[index],
         ...updatedData,
         id, // preserve ID
+        imageUrl: safeImageUrl(updatedData.imageUrl ?? questions[index].imageUrl),
+        imageAlt: cleanText(updatedData.imageAlt ?? questions[index].imageAlt ?? updatedData.question ?? questions[index].question, 160),
+        imageLayout: ["contain", "wide", "compact"].includes(updatedData.imageLayout) ? updatedData.imageLayout : (questions[index].imageLayout || "contain"),
         timeLimit: parseInt(updatedData.timeLimit, 10) || questions[index].timeLimit || 40,
         pointWeight: parseInt(updatedData.pointWeight, 10) || questions[index].pointWeight || 100,
         updatedAt: new Date().toISOString()
@@ -140,27 +235,32 @@ export class StorageManager {
         const item = incoming[i];
         if (!item || typeof item !== "object") continue;
 
-        const question = (item.question || "").trim();
+        const question = cleanText(item.question, 1000);
         if (!question) continue;
 
-        const options = Array.isArray(item.options) ? item.options.map((o) => String(o).trim()) : [];
-        if (options.length < 2) continue;
+        const options = Array.isArray(item.options) ? item.options.slice(0, 4).map((o) => cleanText(o, 300)) : [];
+        if (options.length < 2 || options.some((option) => !option)) continue;
 
         const correctAnswer = typeof item.correctAnswer === "number" && item.correctAnswer >= 0 && item.correctAnswer < options.length
           ? item.correctAnswer
           : 0;
 
         const validItem = {
-          id: item.id && !item.id.startsWith("default-") ? item.id : "custom-" + Date.now() + "-" + i,
+          id: item.id && !String(item.id).startsWith("default-")
+            ? cleanText(item.id, 80).replace(/[^a-zA-Z0-9_-]/g, "-")
+            : "custom-" + Date.now() + "-" + i,
           category: item.category === "literasi" ? "literasi" : "numerasi",
-          topic: (item.topic || "Materi Umum").trim(),
+          topic: cleanText(item.topic || "Materi Umum", 100),
           grade: parseInt(item.grade, 10) >= 1 && parseInt(item.grade, 10) <= 6 ? parseInt(item.grade, 10) : 4,
           difficulty: ["easy", "medium", "hard"].includes(item.difficulty) ? item.difficulty : "medium",
-          passage: (item.passage || "").trim(),
+          passage: cleanText(item.passage, 3000),
           question,
           options,
           correctAnswer,
-          explanation: (item.explanation || "").trim(),
+          explanation: cleanText(item.explanation, 2000),
+          imageUrl: safeImageUrl(item.imageUrl),
+          imageAlt: cleanText(item.imageAlt || item.question, 160),
+          imageLayout: ["contain", "wide", "compact"].includes(item.imageLayout) ? item.imageLayout : "contain",
           timeLimit: parseInt(item.timeLimit, 10) || 40,
           pointWeight: parseInt(item.pointWeight, 10) || 100,
           gestureMap: item.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
@@ -320,19 +420,6 @@ export class StorageManager {
         total: totalQuestions,
         streak: 0
       });
-
-      // Mirror to Firestore in background (non-blocking)
-      try {
-        import("./FirestoreManager.js")
-          .then(({ FirestoreManager }) => {
-            FirestoreManager.recordGameSession(sessionEntry).catch((err) => {
-              console.warn("[StorageManager] Async Firestore session sync failed:", err);
-            });
-          })
-          .catch(() => {});
-      } catch (err) {
-        // Safe node/fallback environment
-      }
 
       return sessionEntry;
     } catch (e) {

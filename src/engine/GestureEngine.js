@@ -53,6 +53,7 @@ export class GestureEngine {
     this.holdStartTime = null;
     this.lastTriggeredTime = 0;
     this.isCoolingDown = false;
+    this.movementProfile = "standard";
 
     // Upright baseline for squat detection
     this.baselineNoseY = null;
@@ -64,6 +65,10 @@ export class GestureEngine {
     if (confidence) this.confidenceThreshold = confidence;
     if (holdMs) this.holdDurationMs = holdMs;
     if (cooldownMs) this.cooldownMs = cooldownMs;
+  }
+
+  setMovementProfile(profile) {
+    this.movementProfile = profile === "hands_only" ? "hands_only" : "standard";
   }
 
   reset() {
@@ -216,6 +221,13 @@ export class GestureEngine {
       return { gesture: GESTURE_TYPES.SKIP, confidence: 0.85 };
     }
 
+    // Accessible alternative for option D: wrists crossed near opposite shoulders.
+    if (this.movementProfile === "hands_only") {
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const crossedAtChest = distance(leftWrist, rightShoulder) < 0.24 && distance(rightWrist, leftShoulder) < 0.24;
+      if (crossedAtChest) return { gesture: GESTURE_TYPES.D, confidence: 0.86 };
+    }
+
     // Squatting position (GESTURE D)
     // 1. Knee flexion: if knees and hips are visible, distance between hip and knee is compressed
     // 2. Relative lowering: nose and hips drop significantly relative to canvas height
@@ -240,7 +252,7 @@ export class GestureEngine {
       squatConfidence = 0.78;
     }
 
-    if (isSquatting) {
+    if (isSquatting && this.movementProfile !== "hands_only") {
       return { gesture: GESTURE_TYPES.D, confidence: squatConfidence };
     }
 

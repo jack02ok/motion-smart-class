@@ -1,45 +1,109 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ==========================================
-    // BANK SOAL (QUESTIONS)
-    // ==========================================
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
+    function validQuestion() {
+      return request.resource.data.keys().hasOnly([
+          'id', 'category', 'topic', 'grade', 'difficulty', 'passage',
+          'question', 'options', 'correctAnswer', 'explanation', 'timeLimit',
+          'pointWeight', 'gestureMap', 'imageUrl', 'imageAlt', 'imageLayout', 'createdAt', 'updatedAt', 'source'
+        ])
+        && request.resource.data.question is string
+        && request.resource.data.question.size() > 0
+        && request.resource.data.question.size() <= 1000
+        && request.resource.data.options is list
+        && request.resource.data.options.size() >= 2
+        && request.resource.data.options.size() <= 4
+        && request.resource.data.correctAnswer is int
+        && request.resource.data.correctAnswer >= 0
+        && request.resource.data.correctAnswer < request.resource.data.options.size();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      // Provision teacher roles through Firebase Admin or the Firebase Console.
+      allow write: if false;
+    }
+
     match /questions/{questionId} {
-      // Izinkan baca untuk seluruh perangkat siswa / display kelas
-      allow read: if true;
-
-      // Validasi penulisan soal (harus memiliki teks pertanyaan dan minimal 2 opsi)
-      allow write: if request.resource.data.question is string
-                   && request.resource.data.options is list
-                   && request.resource.data.options.size() >= 2;
+      allow read: if signedIn();
+      allow create, update: if isTeacher() && validQuestion();
+      allow delete: if isTeacher();
     }
 
-    // ==========================================
-    // RIWAYAT PERMAINAN (GAME SESSIONS)
-    // ==========================================
     match /game_sessions/{sessionId} {
-      // Izinkan baca riwayat sesi untuk analisis kelas di Teacher Studio
-      allow read: if true;
-
-      // Validasi penulisan sesi: Pastikan metrik numerik valid dan TIDAK ADA data biometrik/video
-      allow write: if request.resource.data.score is number
-                   && request.resource.data.accuracy is number
-                   && !('videoStream' in request.resource.data)
-                   && !('landmarks' in request.resource.data)
-                   && !('faceBiometrics' in request.resource.data)
-                   && !('cameraFrame' in request.resource.data);
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.score is number
+        && request.resource.data.accuracy is number
+        && request.resource.data.keys().hasOnly([
+          'id', 'date', 'mode', 'category', 'grade', 'score', 'correctCount',
+          'wrongCount', 'totalQuestions', 'accuracy', 'avgResponseTimeSec',
+          'topicMastery', 'weakTopics', 'studentName', 'teamId', 'source', 'ownerUid'
+        ]);
+      allow read: if isTeacher() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow update: if false;
+      allow delete: if isTeacher() || (signedIn() && resource.data.ownerUid == request.auth.uid);
     }
 
-    // ==========================================
-    // MULTIPLAYER ROOMS (GAME SHOW KELAS)
-    // ==========================================
     match /msc_rooms/{roomCode} {
-      allow read: if true;
-      allow write: if !('videoStream' in request.resource.data)
-                   && !('landmarks' in request.resource.data)
-                   && !('faceBiometrics' in request.resource.data)
-                   && !('cameraFrame' in request.resource.data);
+      allow read: if signedIn();
+      allow create: if isTeacher()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.roomCode == roomCode
+        && request.resource.data.keys().hasOnly([
+          'roomCode', 'hostId', 'hostUid', 'hostName', 'createdAt', 'status',
+          'settings', 'questions', 'currentQuestionIndex', 'questionStartedAt',
+          'countdownSec', 'players', 'leaderboard'
+        ]);
+      allow update: if isTeacher() || isOwnPlayerUpdate();
+      allow delete: if isTeacher();
+
+      function isOwnPlayerUpdate() {
+        let uid = request.auth.uid;
+        let changedRoomFields = request.resource.data.diff(resource.data).affectedKeys();
+        let changedPlayers = request.resource.data.players.diff(resource.data.players).affectedKeys();
+        return signedIn()
+          && changedRoomFields.hasOnly(['players'])
+          && changedPlayers.hasOnly([uid])
+          && request.resource.data.players[uid].id == uid
+          && (
+            (!(uid in resource.data.players)
+              && request.resource.data.players[uid].score == 0
+              && request.resource.data.players[uid].correctCount == 0
+              && request.resource.data.players[uid].name is string
+              && request.resource.data.players[uid].name.size() > 0
+              && request.resource.data.players[uid].name.size() <= 40
+              && request.resource.data.players[uid].keys().hasOnly([
+                'id', 'name', 'avatar', 'score', 'streak', 'correctCount',
+                'hasAnswered', 'lastAnswer', 'answerTimeMs', 'isCorrect',
+                'joinedAt'
+              ]))
+            ||
+            ((uid in resource.data.players)
+              && request.resource.data.players[uid].diff(resource.data.players[uid]).affectedKeys()
+                .hasOnly(['hasAnswered', 'lastAnswer', 'answerTimeMs'])
+              && request.resource.data.players[uid].hasAnswered == true
+              && request.resource.data.players[uid].lastAnswer in ['A', 'B', 'C', 'D']
+              && request.resource.data.players[uid].answerTimeMs is number
+              && request.resource.data.players[uid].answerTimeMs >= 0
+              && request.resource.data.players[uid].answerTimeMs <= 300000)
+          );
+      }
+    }
+
+    // Correct answers and explanations are only available to authenticated teachers.
+    match /msc_room_secrets/{roomCode} {
+      allow read, create, update, delete: if isTeacher();
     }
   }
 }
