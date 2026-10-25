@@ -16,6 +16,15 @@ globalThis.localStorage = (() => {
     clear: () => { store = {}; }
   };
 })();
+globalThis.sessionStorage = (() => {
+  let store = {};
+  return {
+    getItem: (key) => store[key] || null,
+    setItem: (key, value) => { store[key] = String(value); },
+    removeItem: (key) => { delete store[key]; },
+    clear: () => { store = {}; }
+  };
+})();
 
 async function runTests() {
   console.log("=== RUNNING MOTION SMART CLASS TEST SUITE ===");
@@ -475,6 +484,8 @@ async function runTests() {
   assert.strictEqual(cleanSession.cameraFrame, undefined, "Strict Privacy: cameraFrame stripped before storing");
   assert.strictEqual(cleanSession.score, 850);
   assert.strictEqual(cleanSession.accuracy, 80);
+  assert.ok(sessionStorage.getItem("MSC_ANALYTICS_HISTORY_GUEST"), "Anonymous history must use temporary session storage");
+  assert.strictEqual(localStorage.getItem("MSC_ANALYTICS_HISTORY_GUEST"), null, "Anonymous history must not persist in localStorage");
   console.log("✓ FirestoreManager.recordGameSession (Privacy & Non-Biometric Sanitization): PASS");
 
   // Test QuestionEngine merging with Firestore questions
@@ -540,13 +551,15 @@ async function runTests() {
   // Student joins Room
   const studentEngine = new MultiplayerEngine();
   const joinedRoom = await studentEngine.joinRoom(room.roomCode, {
-    name: "Rian",
-    avatar: "🦁"
+    name: "Kelompok Garuda",
+    avatar: "🦁",
+    participantType: "group"
   });
 
   assert.ok(joinedRoom.players[studentEngine.localPlayerId], "Student must be added to room players");
-  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].name, "Rian");
+  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].name, "Kelompok Garuda");
   assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].avatar, "🦁");
+  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].participantType, "group");
   assert.strictEqual(studentEngine.isHost, false);
   console.log("✓ studentEngine.joinRoom: PASS");
 
@@ -577,7 +590,8 @@ async function runTests() {
   // Leaderboard sorting
   const lb = hostEngine.getLeaderboard();
   assert.ok(Array.isArray(lb));
-  assert.strictEqual(lb[0].name, "Rian");
+  assert.strictEqual(lb[0].name, "Kelompok Garuda");
+  assert.strictEqual(lb[0].participantType, "group");
   assert.ok(lb[0].score > 0);
   assert.strictEqual(lb[0].isCorrect, true);
   console.log("✓ hostEngine.getLeaderboard: PASS");
@@ -593,6 +607,7 @@ async function runTests() {
   studentEngine.leaveRoom();
   assert.strictEqual(hostEngine.currentRoom, null);
   assert.strictEqual(studentEngine.currentRoom, null);
+  assert.strictEqual(sessionStorage.getItem(`MSC_ROOM_${room.roomCode}`), null, "Participant room cache must be cleared after leaving");
   console.log("✓ Room cleanup & leaveRoom: PASS");
 
   console.log("\n==========================================");

@@ -353,7 +353,8 @@ export class FirestoreManager {
   // ==========================================
 
   /**
-   * Record a completed game session into Firestore & LocalStorage
+   * Record a completed game session. Guests only use session-scoped storage;
+   * Google accounts may synchronize to Firestore.
    * Ensures strict student privacy (numerical metrics only, zero camera/biometric data).
    */
   static async recordGameSession(sessionData, { saveLocal = true } = {}) {
@@ -373,9 +374,19 @@ export class FirestoreManager {
       weakTopics: sessionData.weakTopics || [],
       studentName: sessionData.studentName || null,
       teamId: sessionData.teamId || null,
+      roomCode: cleanText(sessionData.roomCode || "", 12) || null,
+      participantResults: Array.isArray(sessionData.participantResults)
+        ? sessionData.participantResults.slice(0, 100).map((participant) => ({
+            name: cleanText(participant.name || "Peserta", 40),
+            participantType: participant.participantType === "group" ? "group" : "student",
+            score: Math.max(0, parseInt(participant.score, 10) || 0),
+            correctCount: Math.max(0, parseInt(participant.correctCount, 10) || 0)
+          }))
+        : [],
       source: "app"
     };
-    cleanSession.ownerUid = getCurrentUser()?.uid || null;
+    const currentUser = getCurrentUser();
+    cleanSession.ownerUid = currentUser?.uid || null;
 
     // PRIVACY ENFORCEMENT: Explicitly delete any accidental raw camera or landmark fields
     delete cleanSession.videoStream;
@@ -383,15 +394,13 @@ export class FirestoreManager {
     delete cleanSession.faceBiometrics;
     delete cleanSession.cameraFrame;
 
-    // Save to LocalStorage immediately
+    // Save through the scoped learning store (sessionStorage for guests).
     if (saveLocal) {
       try {
         const history = StorageManager.getAnalyticsHistory();
         history.unshift(cleanSession);
         if (history.length > 50) history.pop();
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
-        }
+        StorageManager.saveAnalyticsHistory(history);
       } catch (e) {
         console.warn("Failed to save session locally:", e);
       }
@@ -399,7 +408,7 @@ export class FirestoreManager {
 
     // Save to Firestore asynchronously
     const status = this.getStatus();
-    if (status.isConfigured) {
+    if (status.isConfigured && currentUser && !currentUser.isAnonymous) {
       try {
         const db = getDb();
         if (db) {
@@ -490,9 +499,7 @@ export class FirestoreManager {
     }
     try {
       const history = StorageManager.getAnalyticsHistory().filter((s) => s.id !== sessionId);
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem("MSC_ANALYTICS_HISTORY", JSON.stringify(history));
-      }
+      StorageManager.saveAnalyticsHistory(history);
     } catch (e) {
       console.warn(e);
     }

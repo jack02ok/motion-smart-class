@@ -99,8 +99,11 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'id', 'date', 'mode', 'category', 'grade', 'score', 'correctCount',
           'wrongCount', 'totalQuestions', 'accuracy', 'avgResponseTimeSec',
-          'topicMastery', 'weakTopics', 'studentName', 'teamId', 'source', 'ownerUid'
-        ]);
+          'topicMastery', 'weakTopics', 'studentName', 'teamId', 'roomCode',
+          'participantResults', 'source', 'ownerUid'
+        ])
+        && request.resource.data.participantResults is list
+        && request.resource.data.participantResults.size() <= 100;
       allow read: if isTeacher() || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow update: if false;
       allow delete: if isTeacher() || (signedIn() && resource.data.ownerUid == request.auth.uid);
@@ -135,10 +138,11 @@ service cloud.firestore {
               && request.resource.data.players[uid].name.size() > 0
               && request.resource.data.players[uid].name.size() <= 40
               && request.resource.data.players[uid].keys().hasOnly([
-                'id', 'name', 'avatar', 'score', 'streak', 'correctCount',
+                'id', 'name', 'participantType', 'avatar', 'score', 'streak', 'correctCount',
                 'hasAnswered', 'lastAnswer', 'answerTimeMs', 'isCorrect',
                 'joinedAt'
-              ]))
+              ])
+              && request.resource.data.players[uid].participantType in ['student', 'group'])
             ||
             ((uid in resource.data.players)
               && request.resource.data.players[uid].diff(resource.data.players[uid]).affectedKeys()

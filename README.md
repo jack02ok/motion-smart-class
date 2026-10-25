@@ -40,6 +40,7 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 ### 5. Mode Guru (Teacher Mode)
 - Login menyediakan pilihan peran **Siswa** atau **Guru** dan menggunakan Google Sign-In. Pilihan peran hanya dipakai ketika profil pertama dibuat.
 - Riwayat bermain disimpan berdasarkan UID Firebase sehingga tetap tersedia saat pengguna masuk kembali.
+- Pengguna tetap dapat bermain sebagai tamu anonim. Statistik, progres, dan riwayat tamu hanya disimpan di `sessionStorage` selama sesi tab aktif dan tidak dikirim ke koleksi riwayat Firestore.
 - Siswa dan guru dapat mengirim soal ke antrean review. Hanya profil `super_admin` atau `owner` yang dapat menyetujui dan menerbitkannya.
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
@@ -94,7 +95,8 @@ motion-smart-class/
   - Guru membuka Room dengan kode PIN 6 karakter acak (misal: `MSC-8492`).
   - Menampilkan soal berukuran besar di depan kelas, status respons siswa live, dan grafik sebaran jawaban.
 - **Player Screen (HP / Tablet Siswa):**
-  - Siswa bergabung dari meja masing-masing dengan memasukkan PIN dan memilih avatar hewan lucu.
+  - Peserta bergabung dengan PIN, memilih identitas siswa atau kelompok, mengisi nama sendiri, dan memilih avatar.
+  - Nama serta hasil masuk ke laporan room milik guru, sementara perangkat peserta hanya memakai cache sesi yang dihapus saat keluar dari room.
   - Kamera di perangkat masing-masing mendeteksi pose jawaban siswa secara lokal tanpa mengirim video ke internet (100% aman privasi).
 - **Dual Real-time Sync:**
   - Terhubung via Cloud Firestore `onSnapshot` untuk multiplayer antar perangkat di seluruh internet.

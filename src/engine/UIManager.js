@@ -41,6 +41,7 @@ export class UIManager {
     this.calibrationChecklist = {};
     this.debugPanelEl = null;
     this.trainingGestures = new Set();
+    this.reportedMultiplayerRooms = new Set();
     this.authStatus = { signedIn: false, role: null, profile: null, user: null, isTeacher: false, isAdmin: false };
 
     // Online Multiplayer Engine
@@ -174,7 +175,7 @@ export class UIManager {
               </div>
               <button id="btn-google-login" class="google-login-btn" type="button"><span aria-hidden="true">G</span> Lanjutkan dengan Google</button>
               <p id="account-login-feedback" class="account-feedback" aria-live="polite"></p>
-              <p class="privacy-note">Peran dipilih saat akun pertama dibuat. Motion Smart Class tidak menyimpan rekaman kamera atau data biometrik.</p>
+              <p class="privacy-note">Anda tetap dapat bermain tanpa login. Riwayat tamu hanya tersedia selama sesi tab ini; login Google diperlukan untuk menyimpan riwayat. Motion Smart Class tidak menyimpan rekaman kamera atau data biometrik.</p>
             </div>
             <div id="account-signed-in" class="hidden">
               <div id="account-profile-card" class="account-profile-card"></div>
@@ -3515,6 +3516,13 @@ export class UIManager {
             </div>
             <div style="font-size: 0.85rem; background: #F1F5F9; padding: 4px 10px; border-radius: 4px;">⚡ ${s.avgResponseTimeSec || 0}s</div>
           </div>
+          ${Array.isArray(s.participantResults) && s.participantResults.length ? `
+            <details class="multiplayer-report-details" style="flex-basis:100%;">
+              <summary>📋 Laporan Room ${escapeHTML(s.roomCode || "")} · ${s.participantResults.length} peserta</summary>
+              <div class="multiplayer-report-grid">
+                ${s.participantResults.map((participant, index) => `<div><span>#${index + 1} ${escapeHTML(participant.name)}</span><small>${participant.participantType === "group" ? "Kelompok" : "Siswa"} · ${Number(participant.correctCount) || 0} benar · ${(Number(participant.score) || 0).toLocaleString()} poin</small></div>`).join("")}
+              </div>
+            </details>` : ""}
         </div>
       `
         )
@@ -4181,6 +4189,7 @@ export class UIManager {
         <div class="mp-player-chip animate-scale-up">
           <span class="mp-chip-avatar">${escapeHTML(p.avatar || '🦁')}</span>
           <span class="mp-chip-name">${escapeHTML(p.name)}</span>
+          <span class="role-badge">${p.participantType === "group" ? "Kelompok" : "Siswa"}</span>
           <span class="mp-chip-ready">✓ Siap</span>
         </div>
       `).join("");
@@ -4214,8 +4223,14 @@ export class UIManager {
             </div>
 
             <div class="form-group" style="margin-top:14px;">
-              <label>NAMA PANGGILAN SISWA:</label>
-              <input type="text" id="mp-input-name" maxlength="15" placeholder="Masukkan namamu (Contoh: Budi)" style="font-size:1.15rem; font-weight:700;">
+              <label>BERGABUNG SEBAGAI:</label>
+              <select id="mp-participant-type" style="font-size:1.05rem; font-weight:700;"><option value="student">Siswa / individu</option><option value="group">Kelompok / tim</option></select>
+            </div>
+
+            <div class="form-group" style="margin-top:14px;">
+              <label id="mp-name-label">NAMA PANGGILAN SISWA:</label>
+              <input type="text" id="mp-input-name" maxlength="40" placeholder="Contoh: Budi" autocomplete="off" style="font-size:1.15rem; font-weight:700;">
+              <small>Nama hanya dikirim ke room dan laporan guru. Perangkat peserta tidak menyimpannya sebagai riwayat.</small>
             </div>
 
             <div class="form-group" style="margin-top:14px;">
@@ -4244,6 +4259,12 @@ export class UIManager {
       this.game.setState(GAME_STATES.MULTIPLAYER_HUB);
     });
 
+    document.getElementById("mp-participant-type")?.addEventListener("change", (event) => {
+      const isGroup = event.target.value === "group";
+      document.getElementById("mp-name-label").textContent = isGroup ? "NAMA KELOMPOK / TIM:" : "NAMA PANGGILAN SISWA:";
+      document.getElementById("mp-input-name").placeholder = isGroup ? "Contoh: Kelompok Garuda" : "Contoh: Budi";
+    });
+
     // Avatar selector
     const avatarBtns = document.querySelectorAll(".mp-avatar-btn");
     avatarBtns.forEach((btn) => {
@@ -4258,7 +4279,8 @@ export class UIManager {
     // Submit Join
     const submitJoin = async () => {
       const pin = document.getElementById("mp-input-pin").value.trim().toUpperCase();
-      const name = document.getElementById("mp-input-name").value.trim() || "Siswa";
+      const participantType = document.getElementById("mp-participant-type").value;
+      const name = document.getElementById("mp-input-name").value.trim() || (participantType === "group" ? "Kelompok" : "Siswa");
       const errBox = document.getElementById("mp-join-error");
 
       if (!pin) {
@@ -4271,7 +4293,7 @@ export class UIManager {
       this.audio.playClick();
 
       try {
-        await this.multiplayer.joinRoom(pin, { name, avatar: selectedAvatar });
+        await this.multiplayer.joinRoom(pin, { name, avatar: selectedAvatar, participantType });
         this.audio.playVictory();
         this.game.setState(GAME_STATES.MULTIPLAYER_PLAYER_LOBBY);
       } catch (err) {
@@ -4300,7 +4322,7 @@ export class UIManager {
       <div class="screen-mp-player-lobby animate-fade-in">
         <div class="mp-player-lobby-card">
           <div class="mp-player-badge-top">${avatar}</div>
-          <h2>Halo, ${name}!</h2>
+          <h2>${this.multiplayer.localParticipantType === "group" ? "Halo, Kelompok" : "Halo"}, ${escapeHTML(name)}!</h2>
           <p class="mp-joined-room-text">Kamu terhubung ke Room: <strong>${room ? room.roomCode : '...'}</strong></p>
 
           <div class="mp-player-status-box">
@@ -4726,6 +4748,7 @@ export class UIManager {
 
   // 8. MULTIPLAYER PODIUM (FINAL CELEBRATION)
   renderMultiplayerPodium(container) {
+    const room = this.multiplayer.currentRoom;
     const leaderboard = this.multiplayer.getLeaderboard();
     const winner1 = leaderboard[0] || { name: "-", avatar: "🥇", score: 0 };
     const winner2 = leaderboard[1] || { name: "-", avatar: "🥈", score: 0 };
@@ -4738,6 +4761,13 @@ export class UIManager {
       origin: { y: 0.55 }
     });
     this.audio.playVictory();
+
+    if (this.multiplayer.isHost && room && !this.reportedMultiplayerRooms.has(room.roomCode)) {
+      this.reportedMultiplayerRooms.add(room.roomCode);
+      this.saveMultiplayerTeacherReport(room, leaderboard).catch((error) => {
+        console.warn("[Multiplayer] Laporan guru belum dapat disimpan:", error);
+      });
+    }
 
     container.innerHTML = `
       <div class="screen-mp-podium animate-fade-in">
@@ -4785,7 +4815,7 @@ export class UIManager {
               <div class="mp-full-row">
                 <span class="mp-full-rank">#${idx + 1}</span>
                 <span class="mp-full-avatar">${escapeHTML(p.avatar || '🦁')}</span>
-                <span class="mp-full-name">${escapeHTML(p.name)}</span>
+                <span class="mp-full-name">${escapeHTML(p.name)} <small>(${p.participantType === "group" ? "Kelompok" : "Siswa"})</small></span>
                 <span class="mp-full-correct">Jawaban Benar: ${p.correctCount || 0}</span>
                 <span class="mp-full-score">${p.score.toLocaleString()} PTS</span>
               </div>
@@ -4805,6 +4835,31 @@ export class UIManager {
       this.audio.playClick();
       this.multiplayer.leaveRoom();
       this.game.setState(GAME_STATES.HOME);
+    });
+  }
+
+  async saveMultiplayerTeacherReport(room, leaderboard) {
+    const participants = leaderboard.map((participant) => ({
+      name: participant.name,
+      participantType: participant.participantType,
+      score: participant.score,
+      correctCount: participant.correctCount
+    }));
+    const totalCorrect = participants.reduce((sum, participant) => sum + participant.correctCount, 0);
+    const totalAnswers = participants.length * (room.questions?.length || 0);
+    await FirestoreManager.recordGameSession({
+      id: `room-report-${room.roomCode}-${Date.now()}`,
+      date: new Date().toISOString(),
+      mode: "multiplayer_classroom",
+      category: room.settings?.category || "campuran",
+      grade: room.settings?.grade || "all",
+      score: participants.reduce((sum, participant) => sum + participant.score, 0),
+      correctCount: totalCorrect,
+      wrongCount: Math.max(0, totalAnswers - totalCorrect),
+      totalQuestions: totalAnswers,
+      accuracy: totalAnswers ? Math.round((totalCorrect / totalAnswers) * 100) : 0,
+      roomCode: room.roomCode,
+      participantResults: participants
     });
   }
 }
