@@ -8,36 +8,87 @@ service cloud.firestore {
     function isTeacher() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'super_admin', 'owner'];
     }
 
-    function validQuestion() {
-      return request.resource.data.keys().hasOnly([
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['super_admin', 'owner'];
+    }
+
+    function validQuestionData(question) {
+      return question.keys().hasOnly([
           'id', 'category', 'topic', 'grade', 'difficulty', 'passage',
           'question', 'options', 'correctAnswer', 'explanation', 'timeLimit',
           'pointWeight', 'gestureMap', 'imageUrl', 'imageAlt', 'imageLayout', 'createdAt', 'updatedAt', 'source'
         ])
-        && request.resource.data.question is string
-        && request.resource.data.question.size() > 0
-        && request.resource.data.question.size() <= 1000
-        && request.resource.data.options is list
-        && request.resource.data.options.size() >= 2
-        && request.resource.data.options.size() <= 4
-        && request.resource.data.correctAnswer is int
-        && request.resource.data.correctAnswer >= 0
-        && request.resource.data.correctAnswer < request.resource.data.options.size();
+        && question.question is string
+        && question.question.size() > 0
+        && question.question.size() <= 1000
+        && question.options is list
+        && question.options.size() >= 2
+        && question.options.size() <= 4
+        && question.correctAnswer is int
+        && question.correctAnswer >= 0
+        && question.correctAnswer < question.options.size();
+    }
+
+    function validQuestion() {
+      return validQuestionData(request.resource.data);
     }
 
     match /users/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      // Provision teacher roles through Firebase Admin or the Firebase Console.
-      allow write: if false;
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.resource.data.uid == uid
+        && request.resource.data.role in ['student', 'teacher']
+        && request.resource.data.keys().hasOnly([
+          'uid', 'role', 'displayName', 'email', 'photoURL', 'createdAt', 'updatedAt'
+        ]);
+      // Self-service profiles cannot change role. Elevated roles are provisioned
+      // through Firebase Admin SDK or Firebase Console.
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'updatedAt'
+        ]);
+      allow delete: if isAdmin();
     }
 
     match /questions/{questionId} {
       allow read: if signedIn();
-      allow create, update: if isTeacher() && validQuestion();
-      allow delete: if isTeacher();
+      allow create, update: if isAdmin() && validQuestion();
+      allow delete: if isAdmin();
+    }
+
+    match /question_submissions/{submissionId} {
+      allow create: if signedIn()
+        && !request.auth.token.firebase.sign_in_provider.matches('anonymous')
+        && request.resource.data.id == submissionId
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerRole in ['student', 'teacher']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.reviewerUid == null
+        && request.resource.data.reviewedAt == null
+        && request.resource.data.reviewNote == ''
+        && request.resource.data.keys().hasOnly([
+          'id', 'ownerUid', 'ownerRole', 'ownerName', 'ownerEmail', 'status',
+          'question', 'submittedAt', 'updatedAt', 'reviewerUid', 'reviewedAt', 'reviewNote'
+        ])
+        && validQuestionData(request.resource.data.question);
+      allow read: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if isAdmin()
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'reviewerUid', 'reviewedAt', 'updatedAt', 'reviewNote'
+        ]);
+      allow delete: if isAdmin();
     }
 
     match /game_sessions/{sessionId} {

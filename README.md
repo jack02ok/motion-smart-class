@@ -38,8 +38,9 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
 
 ### 5. Mode Guru (Teacher Mode)
-- Pada penggunaan lokal, PIN dibuat saat Mode Guru dibuka pertama kali dan disimpan hanya di browser perangkat tersebut.
-- Pada penggunaan Cloud Firestore, operasi cloud guru memerlukan Firebase Authentication dan profil role `teacher`; PIN lokal bukan pengganti autentikasi cloud.
+- Login menyediakan pilihan peran **Siswa** atau **Guru** dan menggunakan Google Sign-In. Pilihan peran hanya dipakai ketika profil pertama dibuat.
+- Riwayat bermain disimpan berdasarkan UID Firebase sehingga tetap tersedia saat pengguna masuk kembali.
+- Siswa dan guru dapat mengirim soal ke antrean review. Hanya profil `super_admin` atau `owner` yang dapat menyetujui dan menerbitkannya.
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
@@ -85,7 +86,7 @@ motion-smart-class/
 │       ├── GestureEngine.js    # Klasifikasi postur tubuh, debouncing & hold meter
 │       ├── GameEngine.js       # State machine permainan & countdown
 │       ├── MultiplayerEngine.js# Cloud Firestore & BroadcastChannel Realtime Rooms
-│       └── UIManager.js        # Antarmuka layar, HUD, modal PIN, podium & konfeti
+│       └── UIManager.js        # Antarmuka layar, login Google, Studio, podium & konfeti
 ```
 
 ### 8. Multiplayer Online Real-Time (Game Show Kelas) 🌐
@@ -128,15 +129,22 @@ npm run check
 
 ## 🔐 Konfigurasi Firebase yang aman
 
-1. Aktifkan **Email/Password** dan **Anonymous** di Firebase Authentication.
-2. Buat akun guru melalui Firebase Console.
-3. Buat dokumen `users/{uid-guru}` dengan field `role` bernilai `teacher`. Dokumen role tidak dapat dibuat atau diubah oleh client.
-4. Deploy `firestore.rules` dari repository ini.
+1. Aktifkan provider **Google** dan **Anonymous** di Firebase Authentication.
+2. Tambahkan domain produksi ke daftar **Authorized domains** Firebase Authentication.
+3. Deploy `firestore.rules` dari repository ini.
+4. Login sekali dengan akun pemilik, lalu ubah field `role` pada `users/{uid}` menjadi `owner` atau `super_admin` melalui Firebase Console/Admin SDK. Client hanya dapat membuat role awal `student` atau `teacher` dan tidak dapat menaikkan hak akses sendiri.
 5. Aktifkan Firebase App Check untuk deployment produksi.
 
-Perangkat siswa masuk secara anonim dan UID Firebase digunakan sebagai identitas pemain. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban. Kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca akun guru.
+Koleksi utama:
 
-> Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. PIN lokal hanya mengunci tampilan pada satu browser dan bukan mekanisme otorisasi server.
+- `users`: profil dan role akun.
+- `game_sessions`: riwayat bermain milik UID pengguna.
+- `question_submissions`: antrean kontribusi dengan status `pending`, `approved`, atau `rejected`.
+- `questions`: hanya berisi soal yang sudah diterbitkan admin.
+
+Perangkat yang belum login Google tetap memakai Firebase Anonymous untuk bermain/multiplayer. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban; kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca guru/admin.
+
+> Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. Deploy rules terbaru sebelum mengaktifkan kontribusi soal.
 
 ## 🖼️ Format gambar pada soal ekspor/impor
 

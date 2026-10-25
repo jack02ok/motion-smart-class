@@ -5,17 +5,27 @@
  */
 
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, doc, getDoc, getDocs, limit, query } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, limit, query, setDoc } from "firebase/firestore";
 import {
   browserLocalPersistence,
+  GoogleAuthProvider,
   getAuth,
+  onAuthStateChanged,
   setPersistence,
   signInAnonymously,
-  signInWithEmailAndPassword,
+  signInWithPopup,
   signOut
 } from "firebase/auth";
 
 const STORAGE_CONFIG_KEY = "MSC_FIREBASE_CONFIG";
+export const USER_ROLES = Object.freeze({
+  STUDENT: "student",
+  TEACHER: "teacher",
+  SUPER_ADMIN: "super_admin",
+  OWNER: "owner"
+});
+
+const SELF_SERVICE_ROLES = new Set([USER_ROLES.STUDENT, USER_ROLES.TEACHER]);
 
 /**
  * Resolve active Firebase configuration from:
@@ -133,6 +143,72 @@ export function getAuthInstance() {
   return firebaseAuth;
 }
 
+export async function getUserProfile(user = getCurrentUser()) {
+  const db = getDb();
+  if (!user || !db || user.isAnonymous) return null;
+  const snapshot = await getDoc(doc(db, "users", user.uid));
+  return snapshot.exists() ? { uid: user.uid, ...snapshot.data() } : null;
+}
+
+export async function getAuthStatus() {
+  const user = getCurrentUser();
+  if (!user) return { signedIn: false, user: null, profile: null, role: null, isTeacher: false, isAdmin: false };
+  if (user.isAnonymous) return { signedIn: true, user, profile: null, role: "guest", isTeacher: false, isAdmin: false };
+  const profile = await getUserProfile(user).catch(() => null);
+  const role = profile?.role || USER_ROLES.STUDENT;
+  return {
+    signedIn: true,
+    user,
+    profile,
+    role,
+    isTeacher: [USER_ROLES.TEACHER, USER_ROLES.SUPER_ADMIN, USER_ROLES.OWNER].includes(role),
+    isAdmin: [USER_ROLES.SUPER_ADMIN, USER_ROLES.OWNER].includes(role)
+  };
+}
+
+/** Observe account changes and resolve the matching Firestore profile. */
+export function observeAuthState(callback) {
+  const auth = getAuthInstance();
+  if (!auth) return () => {};
+  return onAuthStateChanged(auth, async (user) => {
+    const status = await getAuthStatus().catch(() => ({ signedIn: Boolean(user), user, profile: null, role: null, isTeacher: false, isAdmin: false }));
+    callback(status);
+  });
+}
+
+/**
+ * Sign in with Google. The selected role is only used when creating the first
+ * profile. Existing roles (including elevated roles) can never be changed here.
+ */
+export async function signInWithGoogle(selectedRole = USER_ROLES.STUDENT) {
+  if (!SELF_SERVICE_ROLES.has(selectedRole)) throw new Error("Pilihan peran tidak valid.");
+  const auth = getAuthInstance();
+  const db = getDb();
+  if (!auth || !db) throw new Error("Firebase belum dikonfigurasi.");
+
+  await setPersistence(auth, browserLocalPersistence);
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  const credential = await signInWithPopup(auth, provider);
+  const profileRef = doc(db, "users", credential.user.uid);
+  const existing = await getDoc(profileRef);
+
+  if (!existing.exists()) {
+    const now = new Date().toISOString();
+    await setDoc(profileRef, {
+      uid: credential.user.uid,
+      role: selectedRole,
+      displayName: credential.user.displayName || "Pengguna Motion Smart Class",
+      email: credential.user.email || "",
+      photoURL: credential.user.photoURL || "",
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  return getAuthStatus();
+}
+
 /** Authenticate classroom devices anonymously and return their stable Firebase UID. */
 export async function ensureAnonymousAuth() {
   if (typeof window === "undefined" || !isFirebaseConfigured()) return null;
@@ -142,33 +218,6 @@ export async function ensureAnonymousAuth() {
   await setPersistence(auth, browserLocalPersistence);
   const credential = await signInAnonymously(auth);
   return credential.user;
-}
-
-/** Sign in a teacher and verify their server-managed /users/{uid}.role. */
-export async function signInTeacher(email, password) {
-  const auth = getAuthInstance();
-  const db = getDb();
-  if (!auth || !db) throw new Error("Firebase belum dikonfigurasi.");
-  await setPersistence(auth, browserLocalPersistence);
-  const credential = await signInWithEmailAndPassword(auth, email, password);
-  const profile = await getDoc(doc(db, "users", credential.user.uid));
-  if (!profile.exists() || profile.data()?.role !== "teacher") {
-    await signOut(auth);
-    throw new Error("Akun ini belum memiliki role teacher di Firestore.");
-  }
-  return credential.user;
-}
-
-export async function getTeacherAuthStatus() {
-  const user = getCurrentUser();
-  const db = getDb();
-  if (!user || !db || user.isAnonymous) return { signedIn: Boolean(user), isTeacher: false, user };
-  try {
-    const profile = await getDoc(doc(db, "users", user.uid));
-    return { signedIn: true, isTeacher: profile.exists() && profile.data()?.role === "teacher", user };
-  } catch {
-    return { signedIn: true, isTeacher: false, user };
-  }
 }
 
 export async function signOutFirebaseUser() {

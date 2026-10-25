@@ -146,6 +146,10 @@ async function runTests() {
   assert.ok(!firestoreRules.includes("allow write: if true"), "Firestore must not expose public writes");
   assert.ok(firestoreRules.includes("msc_room_secrets"), "Answer keys need a teacher-only collection");
   assert.ok(firestoreRules.includes("isOwnPlayerUpdate"), "Player updates must be scoped to their Firebase UID");
+  assert.ok(firestoreRules.includes("question_submissions"), "Question contributions need a moderated collection");
+  assert.ok(firestoreRules.includes("isAdmin() && validQuestion()"), "Only an admin may publish questions");
+  assert.ok(firestoreRules.includes("request.resource.data.role in ['student', 'teacher']"), "Self-service login roles must not include admin roles");
+  assert.ok(firestoreRules.includes("request.resource.data.status in ['approved', 'rejected']"), "Moderation decisions must be constrained");
   console.log("✓ Firestore security invariants: PASS");
 
   // 2. Test QuestionEngine
@@ -399,6 +403,18 @@ async function runTests() {
   // 9. Test Cloud Firestore Integration (Bank Soal & Riwayat Permainan)
   console.log("\n[9] Testing Cloud Firestore Integration (Bank Soal & Riwayat Permainan)...");
   const { FirestoreManager } = await import("../src/engine/FirestoreManager.js");
+  const sanitizedQuestion = FirestoreManager.sanitizeQuestion({
+    question: "  Berapa 2 + 2?  ",
+    options: ["3", "4", "5", "6", "7"],
+    correctAnswer: 1,
+    grade: 99,
+    imageUrl: "javascript:alert(1)"
+  });
+  assert.strictEqual(sanitizedQuestion.question, "Berapa 2 + 2?");
+  assert.strictEqual(sanitizedQuestion.options.length, 4);
+  assert.strictEqual(sanitizedQuestion.grade, 6);
+  assert.strictEqual(sanitizedQuestion.imageUrl, "");
+  console.log("✓ Moderated question sanitization: PASS");
   const { isFirebaseConfigured, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator

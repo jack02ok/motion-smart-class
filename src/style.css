@@ -4678,3 +4678,54 @@ body {
   .session-package-card { align-items: flex-start; flex-direction: column; }
   .image-layout-compact { width: 75%; }
 }
+
+/* Account, role selection, and moderated question workflow */
+.account-btn { border-color: rgba(99,102,241,.3); background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(238,242,255,.96)); }
+.account-modal-card { width: min(760px, calc(100vw - 28px)); }
+.modal-kicker, .feature-panel-header p, .account-history p { color: var(--text-muted); margin-top: 4px; }
+.role-choice-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin: 16px 0 18px; }
+.role-choice { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; align-items: center; padding: 18px; border: 2px solid #e2e8f0; border-radius: 18px; background: #fff; cursor: pointer; transition: border-color .18s ease,transform .18s ease,box-shadow .18s ease; }
+.role-choice:hover, .role-choice.active { border-color: #6366f1; box-shadow: 0 12px 30px rgba(79,70,229,.12); transform: translateY(-2px); }
+.role-choice input { position: absolute; opacity: 0; }
+.role-choice .role-icon { grid-row: span 2; font-size: 2rem; }
+.role-choice strong { font-size: 1.05rem; }
+.role-choice small { color: var(--text-muted); line-height: 1.4; }
+.google-login-btn { width: 100%; min-height: 52px; border: 1px solid #cbd5e1; border-radius: 14px; background: #fff; color: #172033; font-weight: 800; font-size: 1rem; cursor: pointer; box-shadow: 0 8px 24px rgba(15,23,42,.08); }
+.google-login-btn span { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; color: #fff; background: conic-gradient(from -45deg,#4285f4 0 25%,#34a853 0 50%,#fbbc05 0 75%,#ea4335 0); }
+.account-feedback { min-height: 24px; margin-top: 10px; color: #4338ca; font-weight: 700; }
+.privacy-note { color: var(--text-muted); font-size: .8rem; line-height: 1.5; }
+.account-profile-card { display: flex; align-items: center; gap: 16px; padding: 18px; border-radius: 18px; background: linear-gradient(135deg,#eef2ff,#f0fdfa); border: 1px solid #c7d2fe; }
+.account-profile-card img, .profile-avatar-fallback { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+.profile-avatar-fallback { display: grid; place-items: center; background: #4f46e5; color: #fff; font-size: 1.5rem; font-weight: 900; }
+.account-profile-card h3 { margin: 5px 0 2px; }
+.account-profile-card p { color: var(--text-muted); }
+.role-badge { display: inline-block; padding: 3px 9px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: .72rem; font-weight: 900; text-transform: uppercase; }
+.role-super_admin, .role-owner { background: #fef3c7; color: #92400e; }
+.account-actions { display: flex; gap: 10px; margin: 16px 0 22px; flex-wrap: wrap; }
+.account-history-list { display: grid; gap: 8px; margin-top: 12px; }
+.history-row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.history-row > div:last-child { text-align: right; }
+.history-row small { display: block; color: var(--text-muted); margin-top: 3px; }
+.studio-auth-gate { max-width: 620px; margin: 16px auto; text-align: center; padding: 32px; border: 1px solid #c7d2fe; border-radius: 20px; background: linear-gradient(145deg,#fff,#eef2ff); }
+.studio-auth-gate .gate-icon { font-size: 2.5rem; }
+.studio-auth-gate h3 { margin: 10px 0 6px; }
+.studio-auth-gate p { color: var(--text-muted); line-height: 1.55; }
+.submission-list { display: grid; gap: 14px; margin-top: 16px; }
+.submission-card { padding: 18px; border: 1px solid #dbe3ef; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.05); }
+.submission-card-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.submission-card-head h4 { margin-top: 7px; }
+.submission-status { display: inline-block; padding: 4px 9px; border-radius: 999px; font-size: .72rem; font-weight: 900; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-approved { background: #dcfce7; color: #166534; }
+.status-rejected { background: #fee2e2; color: #991b1b; }
+.submission-meta { margin: 10px 0; color: var(--text-muted); font-size: .84rem; }
+.submission-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; padding-left: 28px; }
+.submission-options li { padding: 7px; border-radius: 8px; background: #f8fafc; }
+.submission-options li.correct { color: #166534; background: #dcfce7; font-weight: 800; }
+.review-note { margin-top: 10px; padding: 10px; border-radius: 10px; background: #f8fafc; }
+.submission-review-actions { display: flex; gap: 8px; margin-top: 14px; }
+@media (max-width: 680px) {
+  .role-choice-grid, .submission-options { grid-template-columns: 1fr; }
+  .history-row, .submission-card-head { flex-direction: column; }
+  .history-row > div:last-child { text-align: left; }
+}
