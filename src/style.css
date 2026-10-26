@@ -1428,6 +1428,31 @@ body {
   pointer-events: none;
 }
 
+.camera-issue-panel {
+  padding: 13px;
+  border-top: 1px solid rgba(248,113,113,.45);
+  background: linear-gradient(145deg,#2b1720,#1e1720);
+  color: #fff;
+}
+.camera-issue-panel.hidden { display: none; }
+.camera-issue-copy { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+.camera-issue-icon { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #ef4444; font-weight: 900; }
+.camera-issue-copy strong { display: block; font-size: .86rem; }
+.camera-issue-copy p { margin: 3px 0 0; color: #fecaca; font-size: .75rem; line-height: 1.4; }
+.camera-issue-copy small { display: block; margin-top: 5px; color: #e2e8f0; font-size: .7rem; line-height: 1.38; }
+.camera-issue-copy code { display: inline-block; margin-top: 6px; padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,.1); color: #cbd5e1; font-size: .64rem; }
+.camera-issue-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+.camera-issue-actions button { min-height: 38px; padding: 7px 9px; border-radius: 9px; font-size: .72rem; font-weight: 800; cursor: pointer; }
+.camera-retry-btn { border: 0; background: #fff; color: #991b1b; }
+.camera-touch-btn { border: 1px solid rgba(255,255,255,.28); background: transparent; color: #fff; }
+.camera-issue-actions button:disabled { cursor: wait; opacity: .65; }
+.camera-issue-actions .hidden { display: none; }
+
+.cam-pip-container.calibration-view .camera-issue-panel { padding: 16px 18px; }
+.cam-pip-container.calibration-view .camera-issue-copy strong { font-size: 1rem; }
+.cam-pip-container.calibration-view .camera-issue-copy p { font-size: .84rem; }
+.cam-pip-container.calibration-view .camera-issue-copy small { font-size: .78rem; }
+
 /* Standing Guide Box */
 .cam-guide-box {
   position: absolute;

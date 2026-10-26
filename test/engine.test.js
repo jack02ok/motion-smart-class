@@ -142,6 +142,16 @@ async function runTests() {
   assert.ok(!remaining.some((q) => q.id === q1.id), "Deleted question should not exist");
   console.log("✓ deleteCustomQuestion: PASS");
 
+  const { getCameraConstraintPlans, describeCameraError } = await import("../src/engine/CameraManager.js");
+  const cameraPlans = getCameraConstraintPlans("user");
+  assert.strictEqual(cameraPlans.length, 2, "Camera must provide a PID-compatible fallback plan");
+  assert.deepStrictEqual(cameraPlans[1].constraints, { audio: false, video: true });
+  assert.strictEqual(cameraPlans[0].constraints.video.frameRate.max, undefined, "Preferred camera FPS must not impose a hard maximum");
+  assert.strictEqual(describeCameraError({ name: "NotReadableError" }).title, "Kamera sedang dipakai atau diblokir");
+  assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: false }).action, /overlay/i);
+  assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: true }).action, /allow="camera"/i);
+  console.log("✓ PID camera fallback & diagnostics: PASS");
+
   const { escapeHTML, cleanText, safeColor, safeImageUrl } = await import("../src/utils/security.js");
   assert.strictEqual(escapeHTML('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
   assert.strictEqual(cleanText("Nama\u0000 Siswa", 20), "Nama Siswa");

@@ -134,6 +134,17 @@ export class UIManager {
               </div>
             </div>
 
+            <div id="camera-issue-panel" class="camera-issue-panel hidden" role="alert" aria-live="assertive">
+              <div class="camera-issue-copy">
+                <span class="camera-issue-icon" aria-hidden="true">!</span>
+                <div><strong id="camera-issue-title">Kamera tidak tersedia</strong><p id="camera-issue-message"></p><small id="camera-issue-action"></small><code id="camera-issue-code"></code></div>
+              </div>
+              <div class="camera-issue-actions">
+                <button id="btn-camera-retry" class="camera-retry-btn" type="button">↻ Coba Kamera Lagi</button>
+                <button id="btn-camera-touch" class="camera-touch-btn" type="button">Gunakan Mode Sentuh</button>
+              </div>
+            </div>
+
             <!-- Live Gesture Recognition Banner -->
             <div id="live-gesture-banner" class="live-gesture-banner">
               <span id="gesture-banner-icon">👀</span>
@@ -778,6 +789,29 @@ export class UIManager {
       await this.camera.flipCamera();
     });
 
+    document.getElementById("btn-camera-retry").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      this.audio.playClick();
+      button.disabled = true;
+      button.textContent = "Mencoba kamera...";
+      await this.startCameraSession();
+      button.disabled = false;
+      button.textContent = "↻ Coba Kamera Lagi";
+    });
+
+    document.getElementById("btn-camera-touch").addEventListener("click", () => {
+      this.audio.playClick();
+      const calibrationTouch = document.getElementById("btn-calib-touch");
+      if (calibrationTouch) {
+        calibrationTouch.click();
+        return;
+      }
+      this.pose.stopDetection();
+      this.camera.stopCamera();
+      if (!this.game.touchMode) this.toggleTouchMode();
+      if (this.game.state === GAME_STATES.GESTURE_TRAINING) this.game.setState(GAME_STATES.HOME);
+    });
+
     // Skeleton Overlay Toggle
     document.getElementById("btn-toggle-skeleton").addEventListener("click", () => {
       this.audio.playClick();
@@ -1092,8 +1126,8 @@ export class UIManager {
     });
 
     // Listen to Camera Manager status
-    this.camera.onStatusChange((status, errorMsg) => {
-      this.updateCameraStatusPill(status, errorMsg);
+    this.camera.onStatusChange((status, errorMsg, errorDetails) => {
+      this.updateCameraStatusPill(status, errorMsg, errorDetails);
     });
 
     // Listen to Gesture Engine hold progress
@@ -1151,7 +1185,7 @@ export class UIManager {
     }
   }
 
-  updateCameraStatusPill(status, errorMsg) {
+  updateCameraStatusPill(status, errorMsg, errorDetails = null) {
     const pill = document.getElementById("cam-status-pill");
     const text = document.getElementById("cam-status-text");
     pill.className = "cam-status-pill";
@@ -1159,17 +1193,38 @@ export class UIManager {
     if (status === CAMERA_STATUS.READY) {
       pill.classList.add("status-ready");
       text.textContent = "CAMERA READY";
+      this.updateCameraIssuePanel(null);
     } else if (status === CAMERA_STATUS.CONNECTING) {
       pill.classList.add("status-detecting");
       text.textContent = "DETECTING...";
+      this.updateCameraIssuePanel(null);
     } else if (status === CAMERA_STATUS.ERROR) {
       pill.classList.add("status-error");
       text.textContent = "CAMERA UNAVAILABLE";
       pill.title = errorMsg || "Kamera bermasalah";
+      this.updateCameraIssuePanel(errorDetails || {
+        title: "Kamera tidak tersedia",
+        message: errorMsg || "Kamera tidak dapat dibuka.",
+        action: "Tutup aplikasi lain yang memakai kamera, lalu coba kembali.",
+        code: "CameraError"
+      });
     } else {
       pill.classList.add("status-off");
       text.textContent = "CAMERA OFF";
+      this.updateCameraIssuePanel(null);
     }
+  }
+
+  updateCameraIssuePanel(details) {
+    const panel = document.getElementById("camera-issue-panel");
+    if (!panel) return;
+    panel.classList.toggle("hidden", !details);
+    if (!details) return;
+    document.getElementById("camera-issue-title").textContent = details.title || "Kamera tidak tersedia";
+    document.getElementById("camera-issue-message").textContent = details.message || "Kamera tidak dapat dibuka.";
+    document.getElementById("camera-issue-action").textContent = details.action || "Tekan Coba Kamera Lagi.";
+    document.getElementById("camera-issue-code").textContent = details.code || "CameraError";
+    document.getElementById("btn-camera-retry").classList.toggle("hidden", details.canRetry === false);
   }
 
   updateHoldMeter(progress, gesture) {
@@ -1356,6 +1411,7 @@ export class UIManager {
       await this.pose.loadModel();
     }
 
+    this.pose.stopDetection();
     const res = await this.camera.startCamera(this.videoEl);
     if (res.success) {
       this.pose.startDetection({
