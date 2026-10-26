@@ -133,8 +133,7 @@ export class UIManager {
                 <div class="pose-part-row" aria-label="Bagian tubuh yang terdeteksi">
                   <span id="pose-part-head">Kepala</span>
                   <span id="pose-part-arms">Lengan</span>
-                  <span id="pose-part-torso">Tubuh</span>
-                  <span id="pose-part-legs">Kaki</span>
+                  <span id="pose-part-torso">Tubuh Atas</span>
                 </div>
               </div>
 
@@ -2119,7 +2118,7 @@ export class UIManager {
                 <span>📏</span>
                 <div>
                   <strong>Jarak Ideal (~1.5–2.5 Meter)</strong>
-                  <p>Berdirilah agar kamera menangkap kepala hingga pinggul dengan jelas.</p>
+                  <p>Cukup tampilkan kepala, bahu, siku, dan kedua tangan dengan jelas.</p>
                 </div>
               </div>
               <div class="tip-item">
@@ -2153,13 +2152,13 @@ export class UIManager {
               </div>
               <div class="realtime-calibration-copy">
                 <div class="realtime-calibration-heading">
-                  <div><span class="realtime-eyebrow">DETEKSI TUBUH REAL-TIME</span><h3 id="calib-live-status">Mencari posisi siswa</h3></div>
+                  <div><span class="realtime-eyebrow">DETEKSI SETENGAH TUBUH REAL-TIME</span><h3 id="calib-live-status">Mencari posisi siswa</h3></div>
                   <span id="calib-model-badge" class="calib-model-badge">Memuat sensor</span>
                 </div>
                 <p id="calib-guidance">Masuk ke area kamera hingga tubuh terlihat.</p>
                 <div class="calib-quality-track" aria-hidden="true"><span id="calib-quality-bar"></span></div>
                 <div class="calib-live-metrics">
-                  <span><small>Titik tubuh</small><strong id="calib-points">0/11</strong></span>
+                  <span><small>Titik tubuh atas</small><strong id="calib-points">0/7</strong></span>
                   <span><small>Kestabilan</small><strong id="calib-stability">0%</strong></span>
                   <span><small>Kecepatan</small><strong id="calib-detection-fps">0 FPS</strong></span>
                 </div>
@@ -2182,7 +2181,7 @@ export class UIManager {
               </div>
               <div id="check-body" class="check-item">
                 <span class="check-icon">⏳</span>
-                <span class="check-label">Tubuh Terdeteksi</span>
+                <span class="check-label">Tubuh Atas Terdeteksi</span>
               </div>
               <div id="check-ideal" class="check-item">
                 <span class="check-icon">⏳</span>
@@ -2343,7 +2342,7 @@ export class UIManager {
     if (qualityBar) qualityBar.style.width = `${quality}%`;
     if (status) status.textContent = statusLabels[state];
     if (guidance) guidance.textContent = telemetry.detectorError?.message || calibration.guidance || "Pastikan seluruh tubuh berada di area kamera.";
-    if (points) points.textContent = `${calibration.detectedPoints || 0}/${calibration.totalPoints || 11}`;
+    if (points) points.textContent = `${calibration.detectedPoints || 0}/${calibration.totalPoints || 7}`;
     if (stabilityEl) stabilityEl.textContent = `${stability}%`;
     if (fpsEl) fpsEl.textContent = `${telemetry.fps || 0} FPS`;
     if (modelBadge) {
@@ -2372,8 +2371,7 @@ export class UIManager {
     const setPartState = (id, active) => document.getElementById(id)?.classList.toggle("detected", Boolean(active));
     setPartState("pose-part-head", calibration.parts?.head);
     setPartState("pose-part-arms", calibration.parts?.leftArm && calibration.parts?.rightArm);
-    setPartState("pose-part-torso", calibration.parts?.shoulders && calibration.parts?.hips);
-    setPartState("pose-part-legs", calibration.parts?.legs);
+    setPartState("pose-part-torso", calibration.parts?.upperBody);
 
     // Update Arena Gauges if present
     if (playerPos) {

@@ -341,6 +341,23 @@ async function runTests() {
   assert.strictEqual(resSquat.gesture, GESTURE_TYPES.D, "Gesture D is Squat");
   console.log("✓ Gesture D (Adaptive Squat Position): PASS");
 
+  const upperBodyGestureEngine = new GestureEngine();
+  const upperBodyStanding = upright.map((point) => ({ ...point }));
+  [23, 24, 25, 26].forEach((index) => { upperBodyStanding[index].visibility = 0.1; });
+  upperBodyGestureEngine.classifyPose(upperBodyStanding);
+  const upperBodyLowered = upperBodyStanding.map((point) => ({ ...point }));
+  upperBodyLowered[0].y += 0.14;
+  upperBodyLowered[11].y += 0.12;
+  upperBodyLowered[12].y += 0.12;
+  upperBodyLowered[15].y += 0.12;
+  upperBodyLowered[16].y += 0.12;
+  assert.strictEqual(
+    upperBodyGestureEngine.classifyPose(upperBodyLowered).gesture,
+    GESTURE_TYPES.D,
+    "Upper-body lowering must preserve option D when hips and knees are outside the frame"
+  );
+  console.log("✓ half-body adaptive squat detection: PASS");
+
   const dropoutEngine = new GestureEngine({ holdDurationMs: 450, cooldownMs: 0 });
   assert.strictEqual(dropoutEngine.processLandmarks(landmarksLeftUp, 2000).gesture, GESTURE_TYPES.A);
   const uncertainFrame = dropoutEngine.processLandmarks(null, 2140);
@@ -395,17 +412,18 @@ async function runTests() {
   assert.ok(diagnostics.quality >= 85, "Clear full-body landmarks must produce a strong quality score");
   assert.strictEqual(diagnostics.stability, 100, "An unchanged pose must be fully stable");
   assert.strictEqual(diagnostics.detectedPoints, diagnostics.totalPoints);
+  assert.strictEqual(diagnostics.totalPoints, 7, "Half-body calibration uses seven upper-body landmarks");
   const calibrationPose = new PoseDetector();
   const upperBodyOnly = landmarksLeftUp.map((point) => ({ ...point }));
   upperBodyOnly[23].visibility = 0.1;
   upperBodyOnly[24].visibility = 0.1;
-  assert.strictEqual(calibrationPose.checkCalibration(upperBodyOnly).allReady, false, "Calibration requires the body to be visible");
+  assert.strictEqual(calibrationPose.checkCalibration(upperBodyOnly).allReady, true, "Half-body calibration must not require hips or knees");
 
   let liveCalibration = null;
   calibrationPose.isDetecting = true;
   calibrationPose.onResultsCallback = ({ calibration }) => { liveCalibration = calibration; };
   for (let frame = 0; frame < 10; frame++) {
-    calibrationPose.handleResults({ poseLandmarks: landmarksLeftUp });
+    calibrationPose.handleResults({ poseLandmarks: upperBodyOnly });
   }
   assert.strictEqual(liveCalibration.stableReady, true, "Calibration must lock only after ten valid real-time frames");
   assert.strictEqual(liveCalibration.readyProgress, 100);
@@ -418,7 +436,7 @@ async function runTests() {
   failedPose.handleInferenceError(new Error("WebAssembly blocked by Content Security Policy"));
   assert.strictEqual(failedPose.modelMode, "error");
   assert.match(reportedPoseError.message, /keamanan browser/i, "Repeated inference failures must be visible to the teacher");
-  console.log("✓ landmark smoothing & real-time full-body calibration: PASS");
+  console.log("✓ landmark smoothing & real-time half-body calibration: PASS");
 
   // Test Distance Estimation
   const idealPlayerLandmarks = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
