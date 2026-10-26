@@ -30,6 +30,50 @@ export function smoothPoseLandmarks(previous, current) {
   });
 }
 
+const POSE_KEY_INDICES = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26];
+
+function landmarkVisibility(point) {
+  return point && Number.isFinite(point.visibility) ? point.visibility : point ? 0.8 : 0;
+}
+
+export function getPoseDiagnostics(landmarks, previousLandmarks = null) {
+  const visible = (index, threshold = 0.45) => landmarkVisibility(landmarks?.[index]) >= threshold;
+  const parts = {
+    head: visible(0),
+    shoulders: visible(11) && visible(12),
+    leftArm: visible(11) && visible(13) && visible(15),
+    rightArm: visible(12) && visible(14) && visible(16),
+    hips: visible(23) && visible(24),
+    legs: visible(25) && visible(26)
+  };
+
+  if (!Array.isArray(landmarks)) {
+    return { quality: 0, stability: 0, detectedPoints: 0, totalPoints: POSE_KEY_INDICES.length, parts };
+  }
+
+  const visibilities = POSE_KEY_INDICES.map((index) => landmarkVisibility(landmarks[index]));
+  const detectedPoints = visibilities.filter((value) => value >= 0.45).length;
+  const averageVisibility = visibilities.reduce((sum, value) => sum + value, 0) / POSE_KEY_INDICES.length;
+  const coverage = detectedPoints / POSE_KEY_INDICES.length;
+  const quality = Math.round(Math.max(0, Math.min(1, (averageVisibility * 0.65) + (coverage * 0.35))) * 100);
+
+  let stability = 0;
+  if (Array.isArray(previousLandmarks)) {
+    const movements = POSE_KEY_INDICES.flatMap((index) => {
+      const point = landmarks[index];
+      const previous = previousLandmarks[index];
+      if (!point || !previous || landmarkVisibility(point) < 0.45 || landmarkVisibility(previous) < 0.45) return [];
+      return [Math.hypot(point.x - previous.x, point.y - previous.y)];
+    });
+    if (movements.length) {
+      const averageMovement = movements.reduce((sum, value) => sum + value, 0) / movements.length;
+      stability = Math.round(Math.max(0, Math.min(1, 1 - (averageMovement * 12))) * 100);
+    }
+  }
+
+  return { quality, stability, detectedPoints, totalPoints: POSE_KEY_INDICES.length, parts };
+}
+
 export class PoseDetector {
   constructor() {
     this.pose = null;
@@ -49,6 +93,8 @@ export class PoseDetector {
     this.lastInferenceTime = 0;
     this.isProcessingFrame = false;
     this.loopToken = 0;
+    this.readyFrameCount = 0;
+    this.modelMode = "loading";
 
     // Latest landmarks
     this.latestLandmarks = null;
@@ -92,6 +138,7 @@ export class PoseDetector {
         });
 
         this.isModelLoaded = true;
+        this.modelMode = "mediapipe";
         console.log("MediaPipe Pose initialized successfully.");
         return true;
       }
@@ -102,6 +149,7 @@ export class PoseDetector {
     // Fallback mode enabled
     this.initOpticalFallback();
     this.isModelLoaded = true;
+    this.modelMode = "optical";
     return true;
   }
 
@@ -136,6 +184,7 @@ export class PoseDetector {
     this.lastFrameTime = performance.now();
     this.frameCount = 0;
     this.fpsTimer = performance.now();
+    this.readyFrameCount = 0;
 
     this.prevFrameData = null;
     const loopToken = ++this.loopToken;
@@ -147,6 +196,7 @@ export class PoseDetector {
     this.loopToken += 1;
     this.latestLandmarks = null;
     this.prevFrameData = null;
+    this.readyFrameCount = 0;
     if (this.canvasCtx && this.canvasElement) {
       this.canvasCtx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
     }
@@ -156,13 +206,6 @@ export class PoseDetector {
     if (!this.isDetecting || loopToken !== this.loopToken) return;
 
     const now = performance.now();
-    this.frameCount++;
-    if (now - this.fpsTimer >= 1000) {
-      this.fps = Math.round((this.frameCount * 1000) / (now - this.fpsTimer));
-      this.frameCount = 0;
-      this.fpsTimer = now;
-    }
-
     if (
       this.videoElement &&
       this.videoElement.readyState >= 2 &&
@@ -212,10 +255,19 @@ export class PoseDetector {
   handleResults(results) {
     if (!this.isDetecting) return;
 
+    this.frameCount++;
+    const frameTime = performance.now();
+    if (frameTime - this.fpsTimer >= 1000) {
+      this.fps = Math.round((this.frameCount * 1000) / (frameTime - this.fpsTimer));
+      this.frameCount = 0;
+      this.fpsTimer = frameTime;
+    }
+
     const rawLandmarks = Array.isArray(results.poseLandmarks) && results.poseLandmarks.length >= 25
       ? results.poseLandmarks
       : null;
-    const landmarks = rawLandmarks ? smoothPoseLandmarks(this.latestLandmarks, rawLandmarks) : null;
+    const previousLandmarks = this.latestLandmarks;
+    const landmarks = rawLandmarks ? smoothPoseLandmarks(previousLandmarks, rawLandmarks) : null;
     this.latestLandmarks = landmarks;
 
     if (landmarks && landmarks.length > 0) {
@@ -238,14 +290,20 @@ export class PoseDetector {
     this.drawSkeleton(landmarks);
 
     // Calibration checklist
-    const calibration = this.checkCalibration(landmarks);
+    const calibration = this.checkCalibration(landmarks, previousLandmarks);
+    this.readyFrameCount = calibration.allReady
+      ? Math.min(10, this.readyFrameCount + 1)
+      : Math.max(0, this.readyFrameCount - 2);
+    calibration.readyProgress = Math.round((this.readyFrameCount / 10) * 100);
+    calibration.stableReady = this.readyFrameCount >= 10;
 
     if (this.onResultsCallback) {
       this.onResultsCallback({
         landmarks,
         poseConfidence: this.poseConfidence,
         fps: this.fps,
-        calibration
+        calibration,
+        detectorMode: this.modelMode
       });
     }
   }
@@ -321,7 +379,8 @@ export class PoseDetector {
     this.handleResults({ poseLandmarks: synthetic });
   }
 
-  checkCalibration(landmarks) {
+  checkCalibration(landmarks, previousLandmarks = null) {
+    const diagnostics = getPoseDiagnostics(landmarks, previousLandmarks);
     if (!landmarks || landmarks.length === 0) {
       return {
         head: false,
@@ -329,7 +388,9 @@ export class PoseDetector {
         hands: false,
         body: false,
         idealPosition: false,
-        allReady: false
+        allReady: false,
+        guidance: "Masuk ke area kamera hingga tubuh terlihat.",
+        ...diagnostics
       };
     }
 
@@ -380,13 +441,24 @@ export class PoseDetector {
 
     const allReady = head && shoulders && hands && body && idealPosition;
 
+    let guidance = "Posisi baik. Diam sejenak untuk mengunci kalibrasi.";
+    if (!head) guidance = "Pastikan kepala terlihat dan tidak terpotong kamera.";
+    else if (!shoulders) guidance = "Mundurkan badan hingga kedua bahu terlihat.";
+    else if (!hands) guidance = "Tampilkan kedua tangan di dalam bingkai kamera.";
+    else if (!body) guidance = "Mundur sedikit agar tubuh hingga pinggul terlihat.";
+    else if (!idealPosition) guidance = "Berdiri di tengah dan sesuaikan jarak dari kamera.";
+    else if (diagnostics.quality < 65) guidance = "Tambah pencahayaan agar bentuk tubuh lebih jelas.";
+    else if (diagnostics.stability > 0 && diagnostics.stability < 65) guidance = "Diam sejenak agar posisi dapat dikunci.";
+
     return {
       head,
       shoulders,
       hands,
       body,
       idealPosition,
-      allReady
+      allReady,
+      guidance,
+      ...diagnostics
     };
   }
 
@@ -426,6 +498,28 @@ export class PoseDetector {
     // Mirror drawing for natural selfie camera experience
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
+
+    const visiblePoints = landmarks.filter((point) => point && (point.visibility === undefined || point.visibility > 0.45));
+    if (visiblePoints.length >= 5) {
+      const xs = visiblePoints.map((point) => point.x * w);
+      const ys = visiblePoints.map((point) => point.y * h);
+      const padding = Math.max(12, w * 0.025);
+      const left = Math.max(4, Math.min(...xs) - padding);
+      const top = Math.max(4, Math.min(...ys) - padding);
+      const right = Math.min(w - 4, Math.max(...xs) + padding);
+      const bottom = Math.min(h - 4, Math.max(...ys) + padding);
+      ctx.beginPath();
+      ctx.setLineDash([10, 7]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(45, 212, 191, 0.88)";
+      ctx.shadowColor = "rgba(45, 212, 191, 0.45)";
+      ctx.shadowBlur = 10;
+      if (typeof ctx.roundRect === "function") ctx.roundRect(left, top, right - left, bottom - top, 14);
+      else ctx.rect(left, top, right - left, bottom - top);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+    }
 
     // Draw glowing bones
     connections.forEach(([startIdx, endIdx]) => {

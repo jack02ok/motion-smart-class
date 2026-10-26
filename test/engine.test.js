@@ -382,17 +382,30 @@ async function runTests() {
   );
   console.log("✓ classifyArenaZone (Zone A Reach): PASS");
 
-  const { PoseDetector, smoothPoseLandmarks } = await import("../src/engine/PoseDetector.js");
+  const { PoseDetector, smoothPoseLandmarks, getPoseDiagnostics } = await import("../src/engine/PoseDetector.js");
   const previousPose = [{ x: 0.4, y: 0.4, z: 0, visibility: 0.9 }];
   const jitteredPose = [{ x: 0.6, y: 0.6, z: 0, visibility: 0.9 }];
   const smoothedPose = smoothPoseLandmarks(previousPose, jitteredPose);
   assert.ok(smoothedPose[0].x > 0.4 && smoothedPose[0].x < 0.6, "Pose smoothing must reduce landmark jitter");
+  const diagnostics = getPoseDiagnostics(landmarksLeftUp, landmarksLeftUp);
+  assert.ok(diagnostics.quality >= 85, "Clear full-body landmarks must produce a strong quality score");
+  assert.strictEqual(diagnostics.stability, 100, "An unchanged pose must be fully stable");
+  assert.strictEqual(diagnostics.detectedPoints, diagnostics.totalPoints);
   const calibrationPose = new PoseDetector();
   const upperBodyOnly = landmarksLeftUp.map((point) => ({ ...point }));
   upperBodyOnly[23].visibility = 0.1;
   upperBodyOnly[24].visibility = 0.1;
   assert.strictEqual(calibrationPose.checkCalibration(upperBodyOnly).allReady, false, "Calibration requires the body to be visible");
-  console.log("✓ landmark smoothing & full-body calibration: PASS");
+
+  let liveCalibration = null;
+  calibrationPose.isDetecting = true;
+  calibrationPose.onResultsCallback = ({ calibration }) => { liveCalibration = calibration; };
+  for (let frame = 0; frame < 10; frame++) {
+    calibrationPose.handleResults({ poseLandmarks: landmarksLeftUp });
+  }
+  assert.strictEqual(liveCalibration.stableReady, true, "Calibration must lock only after ten valid real-time frames");
+  assert.strictEqual(liveCalibration.readyProgress, 100);
+  console.log("✓ landmark smoothing & real-time full-body calibration: PASS");
 
   // Test Distance Estimation
   const idealPlayerLandmarks = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));

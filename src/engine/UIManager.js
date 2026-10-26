@@ -124,6 +124,20 @@ export class UIManager {
                 <div class="guide-text">Area Berdiri Ideal</div>
               </div>
 
+              <div id="pose-realtime-hud" class="pose-realtime-hud" aria-live="polite">
+                <div class="pose-hud-topline">
+                  <span id="pose-hud-state" class="pose-hud-state searching"><i></i><strong>Mencari tubuh</strong></span>
+                  <span id="pose-hud-quality" class="pose-hud-quality">0%</span>
+                </div>
+                <div class="pose-hud-meter" aria-hidden="true"><span id="pose-hud-meter-fill"></span></div>
+                <div class="pose-part-row" aria-label="Bagian tubuh yang terdeteksi">
+                  <span id="pose-part-head">Kepala</span>
+                  <span id="pose-part-arms">Lengan</span>
+                  <span id="pose-part-torso">Tubuh</span>
+                  <span id="pose-part-legs">Kaki</span>
+                </div>
+              </div>
+
               <!-- Hold Confirmation Ring Meter -->
               <div id="hold-meter-container" class="hold-meter-container hidden">
                 <svg class="hold-svg" viewBox="0 0 100 100">
@@ -1312,6 +1326,7 @@ export class UIManager {
     const camPip = document.getElementById("cam-pip-container");
     const guideBox = document.getElementById("cam-guide-box");
     const appEl = document.getElementById("msc-app");
+    camPip?.classList.toggle("realtime-calibration", state === GAME_STATES.CALIBRATION);
 
     // Reparent cam-pip-container back to msc-app if transitioning away from CALIBRATION
     if (state !== GAME_STATES.CALIBRATION && state !== GAME_STATES.GESTURE_TRAINING) {
@@ -1417,8 +1432,8 @@ export class UIManager {
       this.pose.startDetection({
         videoElement: this.videoEl,
         canvasElement: this.canvasEl,
-        onResults: ({ landmarks, poseConfidence, fps, calibration }) => {
-          this.handlePoseResults({ landmarks, poseConfidence, fps, calibration });
+        onResults: ({ landmarks, poseConfidence, fps, calibration, detectorMode }) => {
+          this.handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode });
         }
       });
     } else {
@@ -1427,13 +1442,13 @@ export class UIManager {
     }
   }
 
-  handlePoseResults({ landmarks, poseConfidence, fps, calibration }) {
+  handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode }) {
     const isArena = this.game.selectedMode === GAME_MODES.ARENA;
     const playerPos = this.gesture.estimatePlayerPosition(landmarks);
 
     // If in Calibration, update calibration checklist + Arena distance/lighting gauges
     if (this.game.state === GAME_STATES.CALIBRATION) {
-      this.updateCalibrationUI(calibration, playerPos);
+      this.updateCalibrationUI(calibration, playerPos, { poseConfidence, fps, detectorMode });
     }
 
     // Motion Arena Zone classification
@@ -2126,6 +2141,26 @@ export class UIManager {
               </p>
             </div>
 
+            <div id="realtime-calibration-card" class="realtime-calibration-card state-searching" role="status" aria-live="polite">
+              <div class="realtime-score-ring">
+                <strong id="calib-quality-value">0%</strong>
+                <span>Kualitas</span>
+              </div>
+              <div class="realtime-calibration-copy">
+                <div class="realtime-calibration-heading">
+                  <div><span class="realtime-eyebrow">DETEKSI TUBUH REAL-TIME</span><h3 id="calib-live-status">Mencari posisi siswa</h3></div>
+                  <span id="calib-model-badge" class="calib-model-badge">Memuat sensor</span>
+                </div>
+                <p id="calib-guidance">Masuk ke area kamera hingga tubuh terlihat.</p>
+                <div class="calib-quality-track" aria-hidden="true"><span id="calib-quality-bar"></span></div>
+                <div class="calib-live-metrics">
+                  <span><small>Titik tubuh</small><strong id="calib-points">0/11</strong></span>
+                  <span><small>Kestabilan</small><strong id="calib-stability">0%</strong></span>
+                  <span><small>Kecepatan</small><strong id="calib-detection-fps">0 FPS</strong></span>
+                </div>
+              </div>
+            </div>
+
             <!-- Visual Checklist Cards -->
             <div class="calib-checklist-grid">
               <div id="check-head" class="check-item">
@@ -2259,7 +2294,7 @@ export class UIManager {
     });
   }
 
-  updateCalibrationUI(calibration, playerPos = null) {
+  updateCalibrationUI(calibration, playerPos = null, telemetry = {}) {
     const updateItem = (id, valid) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -2278,6 +2313,54 @@ export class UIManager {
     updateItem("check-body", calibration.body);
     updateItem("check-ideal", calibration.idealPosition);
 
+    const quality = Number.isFinite(calibration.quality) ? calibration.quality : Math.round((telemetry.poseConfidence || 0) * 100);
+    const stability = Number.isFinite(calibration.stability) ? calibration.stability : 0;
+    const state = calibration.stableReady ? "ready" : calibration.allReady ? "locking" : quality >= 45 ? "adjusting" : "searching";
+    const statusLabels = {
+      ready: "Tubuh terkunci dan siap",
+      locking: `Mengunci posisi… ${calibration.readyProgress || 0}%`,
+      adjusting: "Tubuh terdeteksi, sesuaikan posisi",
+      searching: "Mencari posisi siswa"
+    };
+    const stateLabels = { ready: "TERKUNCI", locking: "MENSTABILKAN", adjusting: "SESUAIKAN", searching: "MENCARI" };
+
+    const qualityValue = document.getElementById("calib-quality-value");
+    const qualityBar = document.getElementById("calib-quality-bar");
+    const status = document.getElementById("calib-live-status");
+    const guidance = document.getElementById("calib-guidance");
+    const points = document.getElementById("calib-points");
+    const stabilityEl = document.getElementById("calib-stability");
+    const fpsEl = document.getElementById("calib-detection-fps");
+    const modelBadge = document.getElementById("calib-model-badge");
+    const liveCard = document.getElementById("realtime-calibration-card");
+    if (qualityValue) qualityValue.textContent = `${quality}%`;
+    if (qualityBar) qualityBar.style.width = `${quality}%`;
+    if (status) status.textContent = statusLabels[state];
+    if (guidance) guidance.textContent = calibration.guidance || "Pastikan seluruh tubuh berada di area kamera.";
+    if (points) points.textContent = `${calibration.detectedPoints || 0}/${calibration.totalPoints || 11}`;
+    if (stabilityEl) stabilityEl.textContent = `${stability}%`;
+    if (fpsEl) fpsEl.textContent = `${telemetry.fps || 0} FPS`;
+    if (modelBadge) modelBadge.textContent = telemetry.detectorMode === "optical" ? "Mode kompatibel" : "AI Pose aktif";
+    if (liveCard) liveCard.className = `realtime-calibration-card state-${state}`;
+
+    const hudState = document.getElementById("pose-hud-state");
+    const hudQuality = document.getElementById("pose-hud-quality");
+    const hudMeter = document.getElementById("pose-hud-meter-fill");
+    if (hudState) {
+      hudState.className = `pose-hud-state ${state}`;
+      const label = hudState.querySelector("strong");
+      if (label) label.textContent = stateLabels[state];
+    }
+    if (hudQuality) hudQuality.textContent = `${quality}%`;
+    if (hudMeter) hudMeter.style.width = `${quality}%`;
+    document.getElementById("cam-guide-box")?.classList.toggle("locked", state === "ready" || state === "locking");
+
+    const setPartState = (id, active) => document.getElementById(id)?.classList.toggle("detected", Boolean(active));
+    setPartState("pose-part-head", calibration.parts?.head);
+    setPartState("pose-part-arms", calibration.parts?.leftArm && calibration.parts?.rightArm);
+    setPartState("pose-part-torso", calibration.parts?.shoulders && calibration.parts?.hips);
+    setPartState("pose-part-legs", calibration.parts?.legs);
+
     // Update Arena Gauges if present
     if (playerPos) {
       const distEl = document.getElementById("calib-arena-distance");
@@ -2294,16 +2377,18 @@ export class UIManager {
     const startText = document.getElementById("calib-start-text");
 
     if (startBtn && startText) {
-      if (calibration.allReady) {
+      if (calibration.stableReady) {
         startBtn.classList.remove("disabled");
         startBtn.removeAttribute("disabled");
         startBtn.classList.add("ready-pulse");
-        startText.textContent = "READY TO PLAY! MULAI GAME";
+        startText.textContent = "SIAP! MULAI PERMAINAN";
       } else {
         startBtn.classList.add("disabled");
         startBtn.setAttribute("disabled", "true");
         startBtn.classList.remove("ready-pulse");
-        startText.textContent = "Posisikan Diri di Tengah...";
+        startText.textContent = calibration.allReady
+          ? `Menstabilkan Posisi… ${calibration.readyProgress || 0}%`
+          : "Posisikan Tubuh di Dalam Bingkai...";
       }
     }
   }
