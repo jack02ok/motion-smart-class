@@ -93,6 +93,8 @@ async function runTests() {
   ].join("\n"));
   assert.strictEqual(csvResult.success, true);
   assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
+  const generatedQuestionIds = StorageManager.getCustomQuestions().map((question) => question.id);
+  assert.strictEqual(new Set(generatedQuestionIds).size, generatedQuestionIds.length, "Rapid imports must always generate unique IDs");
   console.log("✓ importQuestionsFromCSV: PASS");
 
   const { createQuestionWorkbook, readQuestionWorkbook } = await import("../src/utils/questionSpreadsheet.js");
