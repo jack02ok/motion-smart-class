@@ -47,6 +47,7 @@ export class MultiplayerEngine {
     this.localPlayerId = this._getOrCreatePlayerId();
     this.localPlayerName = "Siswa";
     this.localPlayerAvatar = "🦁";
+    this.localParticipantType = "student";
     this.hostQuestions = [];
     this.cloudConnected = false;
 
@@ -84,6 +85,7 @@ export class MultiplayerEngine {
     if (this.roomCode && msg.roomCode.toUpperCase() === this.roomCode.toUpperCase()) {
       if (msg.type === "ROOM_UPDATED" && msg.room) {
         this.currentRoom = msg.room;
+        this._saveRoomLocally(msg.room);
         if (typeof this.onRoomUpdate === "function") {
           this.onRoomUpdate(this.currentRoom);
         }
@@ -109,11 +111,11 @@ export class MultiplayerEngine {
    * Get or generate unique local device ID
    */
   _getOrCreatePlayerId() {
-    if (typeof localStorage === "undefined") return "p_" + Math.random().toString(36).substring(2, 9);
-    let id = localStorage.getItem("MSC_DEVICE_PLAYER_ID");
+    if (typeof sessionStorage === "undefined") return "p_" + Math.random().toString(36).substring(2, 9);
+    let id = sessionStorage.getItem("MSC_SESSION_PLAYER_ID");
     if (!id) {
       id = "p_" + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem("MSC_DEVICE_PLAYER_ID", id);
+      sessionStorage.setItem("MSC_SESSION_PLAYER_ID", id);
     }
     return id;
   }
@@ -337,12 +339,13 @@ export class MultiplayerEngine {
   /**
    * Join an existing room with code
    */
-  async joinRoom(roomCode, { name = "Siswa", avatar = "🦁" } = {}) {
+  async joinRoom(roomCode, { name = "Siswa", avatar = "🦁", participantType = "student" } = {}) {
     const cloudUser = await this._ensureCloudIdentity().catch(() => null);
     this.isHost = false;
     this.roomCode = roomCode.trim().toUpperCase();
     this.localPlayerName = cleanText(name, 40) || "Siswa";
     this.localPlayerAvatar = cleanText(avatar, 8) || "🦁";
+    this.localParticipantType = participantType === "group" ? "group" : "student";
 
     let room = await this._fetchRoom(this.roomCode);
 
@@ -360,6 +363,7 @@ export class MultiplayerEngine {
     room.players[this.localPlayerId] = {
       id: this.localPlayerId,
       name: this.localPlayerName,
+      participantType: this.localParticipantType,
       avatar: this.localPlayerAvatar,
       score: room.players[this.localPlayerId]?.score || 0,
       streak: room.players[this.localPlayerId]?.streak || 0,
@@ -483,6 +487,8 @@ export class MultiplayerEngine {
    * Leave room and clean up listeners
    */
   leaveRoom() {
+    const leavingRoomCode = this.roomCode;
+    const wasHost = this.isHost;
     if (this.unsubscribeFirestore) {
       this.unsubscribeFirestore();
       this.unsubscribeFirestore = null;
@@ -490,6 +496,12 @@ export class MultiplayerEngine {
     this.currentRoom = null;
     this.roomCode = null;
     this.isHost = false;
+    this.localPlayerName = "Siswa";
+    this.localParticipantType = "student";
+    if (leavingRoomCode) {
+      if (wasHost && typeof localStorage !== "undefined") localStorage.removeItem(LOCAL_STORAGE_PREFIX + leavingRoomCode);
+      if (!wasHost && typeof sessionStorage !== "undefined") sessionStorage.removeItem(LOCAL_STORAGE_PREFIX + leavingRoomCode);
+    }
   }
 
   // ==========================================
@@ -645,16 +657,26 @@ export class MultiplayerEngine {
   }
 
   _saveRoomLocally(room) {
-    if (typeof localStorage === "undefined" || !room) return;
+    if (!room) return;
     try {
-      localStorage.setItem(LOCAL_STORAGE_PREFIX + room.roomCode, JSON.stringify(room));
+      const storage = this.isHost
+        ? (typeof localStorage !== "undefined" ? localStorage : null)
+        : (typeof sessionStorage !== "undefined" ? sessionStorage : null);
+      storage?.setItem(LOCAL_STORAGE_PREFIX + room.roomCode, JSON.stringify(room));
+      // Same-browser offline classrooms use the host's existing mirror as the
+      // teacher-owned source of truth. A participant never creates this entry.
+      if (!this.isHost && typeof localStorage !== "undefined" && localStorage.getItem(LOCAL_STORAGE_PREFIX + room.roomCode)) {
+        localStorage.setItem(LOCAL_STORAGE_PREFIX + room.roomCode, JSON.stringify(room));
+      }
     } catch (e) {}
   }
 
   _getRoomLocally(code) {
-    if (typeof localStorage === "undefined") return null;
     try {
-      const str = localStorage.getItem(LOCAL_STORAGE_PREFIX + code);
+      // A teacher-hosted local room is authoritative; participant session cache
+      // is only a temporary fallback when no host mirror is available.
+      const str = (typeof localStorage !== "undefined" ? localStorage.getItem(LOCAL_STORAGE_PREFIX + code) : null)
+        || (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(LOCAL_STORAGE_PREFIX + code) : null);
       return str ? JSON.parse(str) : null;
     } catch (e) {
       return null;

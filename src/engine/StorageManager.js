@@ -1,4 +1,5 @@
 import { cleanText, safeImageUrl } from "../utils/security.js";
+import { getCurrentUser } from "../firebase.js";
 
 /**
  * MOTION SMART CLASS - Storage Manager
@@ -12,6 +13,7 @@ const STATS_KEY = "MSC_STATS";
 const ANALYTICS_KEY = "MSC_ANALYTICS_HISTORY";
 const ADVENTURE_KEY = "MSC_ADVENTURE_PROGRESS";
 const SESSION_PACKAGES_KEY = "MSC_SESSION_PACKAGES";
+let legacyLearningDataCleared = false;
 
 const DEFAULT_SETTINGS = {
   soundEnabled: true,
@@ -44,6 +46,28 @@ const DEFAULT_TEAMS = [
 ];
 
 export class StorageManager {
+  /**
+   * Learning data is temporary for guests and scoped per UID for Google users.
+   * sessionStorage is automatically cleared when the browser tab/session ends.
+   */
+  static _getLearningStore() {
+    const user = getCurrentUser();
+    const persistent = Boolean(user && !user.isAnonymous);
+    if (!persistent && !legacyLearningDataCleared && typeof localStorage !== "undefined") {
+      [STATS_KEY, ANALYTICS_KEY, ADVENTURE_KEY].forEach((key) => localStorage.removeItem(key));
+      legacyLearningDataCleared = true;
+    }
+    const storage = persistent
+      ? (typeof localStorage !== "undefined" ? localStorage : null)
+      : (typeof sessionStorage !== "undefined" ? sessionStorage : null);
+    return { storage, suffix: persistent ? `_${user.uid}` : "_GUEST" };
+  }
+
+  static _learningKey(baseKey) {
+    const { suffix } = this._getLearningStore();
+    return `${baseKey}${suffix}`;
+  }
+
   static getSettings() {
     try {
       const data = localStorage.getItem(SETTINGS_KEY);
@@ -325,7 +349,8 @@ export class StorageManager {
   // ==========================================
   static getStats() {
     try {
-      const data = localStorage.getItem(STATS_KEY);
+      const { storage } = this._getLearningStore();
+      const data = storage?.getItem(this._learningKey(STATS_KEY));
       return data ? JSON.parse(data) : {
         totalGames: 0,
         totalCorrect: 0,
@@ -341,10 +366,22 @@ export class StorageManager {
 
   static getAnalyticsHistory() {
     try {
-      const data = localStorage.getItem(ANALYTICS_KEY);
+      const { storage } = this._getLearningStore();
+      const data = storage?.getItem(this._learningKey(ANALYTICS_KEY));
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
+    }
+  }
+
+  static saveAnalyticsHistory(history) {
+    try {
+      const { storage } = this._getLearningStore();
+      storage?.setItem(this._learningKey(ANALYTICS_KEY), JSON.stringify((history || []).slice(0, 50)));
+      return history;
+    } catch (error) {
+      console.warn("Failed to save analytics history:", error);
+      return history;
     }
   }
 
@@ -353,7 +390,8 @@ export class StorageManager {
   // ==========================================
   static getAdventureProgress() {
     try {
-      const data = localStorage.getItem(ADVENTURE_KEY);
+      const { storage } = this._getLearningStore();
+      const data = storage?.getItem(this._learningKey(ADVENTURE_KEY));
       return data
         ? JSON.parse(data)
         : {
@@ -369,7 +407,8 @@ export class StorageManager {
 
   static saveAdventureProgress(progress) {
     try {
-      localStorage.setItem(ADVENTURE_KEY, JSON.stringify(progress));
+      const { storage } = this._getLearningStore();
+      storage?.setItem(this._learningKey(ADVENTURE_KEY), JSON.stringify(progress));
       return progress;
     } catch (e) {
       console.warn("Failed to save adventure progress:", e);
@@ -411,7 +450,7 @@ export class StorageManager {
       // Keep last 50 learning sessions
       history.unshift(sessionEntry);
       if (history.length > 50) history.pop();
-      localStorage.setItem(ANALYTICS_KEY, JSON.stringify(history));
+      this.saveAnalyticsHistory(history);
 
       // Update aggregate stats
       this.recordGameResult({
@@ -445,7 +484,8 @@ export class StorageManager {
       if (correct === total && total >= 5) newBadges.add("PERFECT_SCORE");
 
       stats.badges = Array.from(newBadges);
-      localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+      const { storage } = this._getLearningStore();
+      storage?.setItem(this._learningKey(STATS_KEY), JSON.stringify(stats));
       return stats;
     } catch (e) {
       console.error("Failed to record stats:", e);

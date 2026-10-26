@@ -17,13 +17,15 @@ import {
   testFirestoreConnection,
   isFirebaseConfigured,
   ensureAnonymousAuth,
-  getTeacherAuthStatus,
-  signInTeacher,
+  getAuthStatus,
+  observeAuthState,
+  signInWithGoogle,
   signOutFirebaseUser
 } from "../firebase.js";
 import { DEFAULT_QUESTIONS } from "../data/defaultQuestions.js";
 import { MultiplayerEngine, ROOM_STATUS } from "./MultiplayerEngine.js";
 import firestoreRules from "../../firestore.rules?raw";
+import { createQuestionWorkbook, downloadWorkbook, readQuestionWorkbook } from "../utils/questionSpreadsheet.js";
 
 export class UIManager {
   constructor({ appContainer, gameEngine, cameraManager, poseDetector, gestureEngine, audioManager }) {
@@ -39,6 +41,8 @@ export class UIManager {
     this.calibrationChecklist = {};
     this.debugPanelEl = null;
     this.trainingGestures = new Set();
+    this.reportedMultiplayerRooms = new Set();
+    this.authStatus = { signedIn: false, role: null, profile: null, user: null, isTeacher: false, isAdmin: false };
 
     // Online Multiplayer Engine
     this.multiplayer = new MultiplayerEngine();
@@ -48,6 +52,7 @@ export class UIManager {
 
     this.initDOM();
     this.bindEvents();
+    this.initAuthObserver();
   }
 
   initDOM() {
@@ -89,7 +94,12 @@ export class UIManager {
             <!-- Teacher Mode Button -->
             <button id="btn-teacher-open" class="hud-btn teacher-btn" title="Buka Mode Guru">
               <span class="hud-icon">👨‍🏫</span>
-              <span>Guru</span>
+              <span id="studio-button-label">Studio</span>
+            </button>
+
+            <button id="btn-account-open" class="hud-btn account-btn" title="Masuk atau buka profil">
+              <span class="hud-icon">👤</span>
+              <span id="account-button-label">Masuk</span>
             </button>
           </div>
         </header>
@@ -150,6 +160,31 @@ export class UIManager {
           </div>
         </div>
 
+        <!-- ACCOUNT / GOOGLE SIGN-IN MODAL -->
+        <div id="account-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+          <div class="modal-card account-modal-card">
+            <div class="modal-header">
+              <div><h2 id="account-modal-title">Akun Motion Smart Class</h2><p class="modal-kicker">Simpan progres bermain dan kontribusi soal Anda di cloud.</p></div>
+              <button id="btn-account-close" class="modal-close-btn" aria-label="Tutup akun">&times;</button>
+            </div>
+            <div id="account-signed-out">
+              <h3>Pilih peran Anda</h3>
+              <div class="role-choice-grid" role="radiogroup" aria-label="Peran pengguna">
+                <label class="role-choice active"><input type="radio" name="login-role" value="student" checked /><span class="role-icon">🎒</span><strong>Siswa</strong><small>Main, simpan riwayat, dan kirim ide soal.</small></label>
+                <label class="role-choice"><input type="radio" name="login-role" value="teacher" /><span class="role-icon">👨‍🏫</span><strong>Guru</strong><small>Kelola aktivitas kelas dan kirim soal untuk review.</small></label>
+              </div>
+              <button id="btn-google-login" class="google-login-btn" type="button"><span aria-hidden="true">G</span> Lanjutkan dengan Google</button>
+              <p id="account-login-feedback" class="account-feedback" aria-live="polite"></p>
+              <p class="privacy-note">Anda tetap dapat bermain tanpa login. Riwayat tamu hanya tersedia selama sesi tab ini; login Google diperlukan untuk menyimpan riwayat. Motion Smart Class tidak menyimpan rekaman kamera atau data biometrik.</p>
+            </div>
+            <div id="account-signed-in" class="hidden">
+              <div id="account-profile-card" class="account-profile-card"></div>
+              <div class="account-actions"><button id="btn-account-studio" class="primary-btn">Buka Studio & Kontribusi</button><button id="btn-account-logout" class="secondary-btn">Keluar</button></div>
+              <section class="account-history"><div class="feature-panel-header"><div><h3>Riwayat Bermain Saya</h3><p>Riwayat ini terhubung ke UID akun Google Anda.</p></div></div><div id="account-history-list" class="account-history-list"><p>Memuat riwayat...</p></div></section>
+            </div>
+          </div>
+        </div>
+
         <!-- TEACHER STUDIO & CLASS MANAGEMENT MODAL -->
         <div id="teacher-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="teacher-modal-title">
           <div class="modal-card">
@@ -159,29 +194,26 @@ export class UIManager {
             </div>
 
             <div id="teacher-pin-section" class="teacher-pin-section">
-              <p>Masukkan PIN Guru untuk mengakses bank soal, editor, analitik, dan pengaturan:</p>
-              <div class="pin-input-group">
-                <input type="password" id="teacher-pin-input" maxlength="12" placeholder="PIN Guru" autocomplete="current-password" autofocus />
-                <button id="btn-teacher-login" class="primary-btn">Masuk Studio</button>
-              </div>
-              <p id="pin-error-msg" class="error-text hidden" role="alert">PIN guru tidak cocok.</p>
+              <div class="studio-auth-gate"><span class="gate-icon">🔐</span><h3>Masuk untuk membuka Studio</h3><p>Siswa dan guru dapat mengirim soal. Publikasi soal hanya dilakukan setelah review super admin atau pemilik aplikasi.</p><button id="btn-teacher-login" class="primary-btn">Pilih Peran & Masuk dengan Google</button><p id="pin-error-msg" class="error-text hidden" role="alert"></p></div>
             </div>
 
             <div id="teacher-dashboard-section" class="teacher-dashboard-section hidden">
               <!-- Tabs -->
               <div class="modal-tabs">
-                <button class="tab-btn active" data-tab="tab-custom-questions">📋 Bank Soal Guru</button>
-                <button class="tab-btn" data-tab="tab-add-question">➕ / ✏️ Editor Soal</button>
-                <button class="tab-btn" data-tab="tab-analytics">📊 Analitik Belajar</button>
-                <button class="tab-btn" data-tab="tab-session-packages">🗂️ Paket Sesi</button>
-                <button class="tab-btn" data-tab="tab-media-library">🖼️ Media</button>
-                <button class="tab-btn" data-tab="tab-settings">⚙️ Pengaturan Penilaian</button>
-                <button class="tab-btn" data-tab="tab-teams">👥 Skor 4 Tim</button>
-                <button class="tab-btn" data-tab="tab-firebase">🔥 Cloud Firestore</button>
+                <button class="tab-btn active" data-tab="tab-add-question" data-access="account">➕ Kirim Soal</button>
+                <button class="tab-btn" data-tab="tab-my-submissions" data-access="account">📝 Kontribusi Saya</button>
+                <button class="tab-btn" data-tab="tab-review-submissions" data-access="admin">✅ Review Soal</button>
+                <button class="tab-btn" data-tab="tab-custom-questions" data-access="teacher">📋 Bank Soal</button>
+                <button class="tab-btn" data-tab="tab-analytics" data-access="teacher">📊 Analitik Belajar</button>
+                <button class="tab-btn" data-tab="tab-session-packages" data-access="teacher">🗂️ Paket Sesi</button>
+                <button class="tab-btn" data-tab="tab-media-library" data-access="teacher">🖼️ Media</button>
+                <button class="tab-btn" data-tab="tab-settings" data-access="teacher">⚙️ Pengaturan</button>
+                <button class="tab-btn" data-tab="tab-teams" data-access="teacher">👥 Skor 4 Tim</button>
+                <button class="tab-btn" data-tab="tab-firebase" data-access="admin">🔥 Cloud Firestore</button>
               </div>
 
               <!-- Tab 1: Bank Soal Guru (List, Filter, Search, Import/Export, Edit, Delete) -->
-              <div id="tab-custom-questions" class="tab-content active">
+              <div id="tab-custom-questions" class="tab-content">
                 <!-- Firestore Cloud Status & Fast-Sync Bar -->
                 <div class="firestore-status-bar" id="firestore-status-bar">
                   <div class="firestore-badge-group">
@@ -211,8 +243,14 @@ export class UIManager {
                       📊 Impor CSV
                       <input type="file" id="import-csv-input" accept=".csv,text/csv" style="display:none;" />
                     </label>
+                    <label class="secondary-btn btn-file-label" title="Impor bank soal Excel XLS atau XLSX">
+                      📗 Impor Excel
+                      <input type="file" id="import-excel-input" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;" />
+                    </label>
                     <button type="button" id="btn-download-csv-template" class="secondary-btn" title="Unduh format kolom CSV">Template CSV</button>
                     <button id="btn-export-questions" class="secondary-btn" title="Ekspor seluruh bank soal ke JSON">📤 Ekspor Soal (JSON)</button>
+                    <button type="button" id="btn-export-xlsx" class="secondary-btn" title="Ekspor bank soal ke Excel modern">📗 Ekspor XLSX</button>
+                    <button type="button" id="btn-export-xls" class="secondary-btn" title="Ekspor bank soal ke Excel 97–2003">📘 Ekspor XLS</button>
                     <button id="btn-switch-to-add" class="primary-btn" title="Buka form pembuatan soal baru">➕ Tambah Soal Baru</button>
                   </div>
                 </div>
@@ -260,7 +298,7 @@ export class UIManager {
               </div>
 
               <!-- Tab 2: Question Editor (Create / Edit Mode) -->
-              <div id="tab-add-question" class="tab-content">
+              <div id="tab-add-question" class="tab-content active">
                 <!-- Editing Alert Banner -->
                 <div id="editing-banner" class="editing-banner hidden">
                   <span>✏️ <strong>Mode Edit:</strong> Memperbarui soal yang dipilih.</span>
@@ -381,10 +419,20 @@ export class UIManager {
                   </div>
 
                   <div style="display: flex; gap: 12px; margin-top: 18px;">
-                    <button type="submit" id="btn-submit-question" class="primary-btn">Simpan Soal ke Bank Data 💾</button>
+                    <button type="submit" id="btn-submit-question" class="primary-btn">Kirim untuk Review ✅</button>
                     <button type="button" id="btn-cancel-edit" class="secondary-btn hidden">Batal Edit ❌</button>
                   </div>
                 </form>
+              </div>
+
+              <div id="tab-my-submissions" class="tab-content">
+                <div class="feature-panel-header"><div><h3>📝 Kontribusi Soal Saya</h3><p>Pantau status pending, disetujui, atau ditolak oleh super admin.</p></div><button id="btn-refresh-my-submissions" class="secondary-btn btn-sm">Muat Ulang</button></div>
+                <div id="my-submissions-list" class="submission-list"></div>
+              </div>
+
+              <div id="tab-review-submissions" class="tab-content">
+                <div class="feature-panel-header"><div><h3>✅ Antrean Review Soal</h3><p>Hanya super admin atau pemilik aplikasi yang dapat menyetujui dan menerbitkan soal.</p></div><button id="btn-refresh-review-submissions" class="secondary-btn btn-sm">Muat Ulang</button></div>
+                <div id="review-submissions-list" class="submission-list"></div>
               </div>
 
               <!-- Session Packages -->
@@ -474,10 +522,7 @@ export class UIManager {
                     <label>Bobot Skor Standar (Poin):</label>
                     <input type="number" id="setting-base-points" min="50" max="300" step="10" value="100" />
                   </div>
-                  <div class="form-group">
-                    <label>PIN Guru:</label>
-                    <input type="password" id="setting-pin" minlength="4" maxlength="12" autocomplete="new-password" />
-                  </div>
+                  <div class="form-group"><label>Keamanan Studio:</label><small>Akses mengikuti akun Google dan role Firestore. Super admin/owner mengendalikan publikasi soal.</small></div>
                   <div class="form-group"><label>Profil Gerakan:</label><select id="setting-movement-profile"><option value="standard">Standar (termasuk jongkok)</option><option value="hands_only">Hanya gerakan tangan</option></select><small>Profil tangan mengganti pilihan D menjadi silang tangan di depan dada.</small></div>
                   <div class="form-group"><label>Target Jawaban Benar Bersama:</label><input type="number" id="setting-cooperative-goal" min="3" max="20" value="7" /></div>
                   <label class="setting-check"><input type="checkbox" id="setting-large-text" /> Teks besar untuk layar kelas</label>
@@ -576,23 +621,13 @@ export class UIManager {
                   </div>
 
                   <div class="firebase-config-box">
-                    <h4>🔐 Autentikasi Guru untuk Cloud</h4>
+                    <h4>🔐 Akun Google & Hak Akses</h4>
                     <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:12px;">
-                      Gunakan akun Firebase Authentication yang profil <code>users/{uid}</code>-nya memiliki role <code>teacher</code>.
+                      Login Google membuat profil <code>users/{uid}</code>. Peran super admin atau owner harus ditetapkan melalui Firebase Console/Admin SDK.
                     </p>
-                    <div class="firebase-form-grid">
-                      <div class="form-group">
-                        <label>Email Guru:</label>
-                        <input type="email" id="fb-teacher-email" autocomplete="username" />
-                      </div>
-                      <div class="form-group">
-                        <label>Password:</label>
-                        <input type="password" id="fb-teacher-password" autocomplete="current-password" />
-                      </div>
-                      <div class="fb-form-actions">
-                        <button type="button" id="btn-fb-teacher-login" class="primary-btn">Masuk sebagai Guru</button>
-                        <button type="button" id="btn-fb-teacher-logout" class="secondary-btn">Keluar</button>
-                      </div>
+                    <div class="fb-form-actions">
+                      <button type="button" id="btn-fb-teacher-login" class="primary-btn">Buka Akun Google</button>
+                      <button type="button" id="btn-fb-teacher-logout" class="secondary-btn">Keluar</button>
                     </div>
                     <div id="fb-teacher-auth-feedback" class="fb-feedback-box"></div>
                   </div>
@@ -672,18 +707,30 @@ export class UIManager {
       this.openTeacherModal();
     });
 
+    document.getElementById("btn-account-open").addEventListener("click", () => this.openAccountModal());
+    document.getElementById("btn-account-close").addEventListener("click", () => this.closeAccountModal());
+    document.getElementById("btn-google-login").addEventListener("click", () => this.handleGoogleLogin());
+    document.getElementById("btn-account-logout").addEventListener("click", () => this.handleAccountLogout());
+    document.getElementById("btn-account-studio").addEventListener("click", () => {
+      this.closeAccountModal();
+      this.openTeacherModal();
+    });
+    document.querySelectorAll('input[name="login-role"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        document.querySelectorAll(".role-choice").forEach((item) => item.classList.toggle("active", item.querySelector("input").checked));
+      });
+    });
+
     // Teacher Modal Close
     document.getElementById("btn-teacher-close").addEventListener("click", () => {
       this.audio.playClick();
       this.closeTeacherModal();
     });
 
-    // Teacher PIN Login
+    // Studio authentication gate
     document.getElementById("btn-teacher-login").addEventListener("click", () => {
-      this.handleTeacherLogin();
-    });
-    document.getElementById("teacher-pin-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.handleTeacherLogin();
+      this.closeTeacherModal();
+      this.openAccountModal();
     });
 
     // Teacher Modal Tabs
@@ -709,9 +756,16 @@ export class UIManager {
           this.renderMediaLibrary();
         } else if (tabId === "tab-firebase") {
           this.renderFirebasePanel();
+        } else if (tabId === "tab-my-submissions") {
+          this.renderMySubmissions();
+        } else if (tabId === "tab-review-submissions") {
+          this.renderReviewSubmissions();
         }
       });
     });
+
+    document.getElementById("btn-refresh-my-submissions")?.addEventListener("click", () => this.renderMySubmissions());
+    document.getElementById("btn-refresh-review-submissions")?.addEventListener("click", () => this.renderReviewSubmissions());
 
     // Flip Camera Button
     document.getElementById("btn-flip-cam").addEventListener("click", async () => {
@@ -740,7 +794,6 @@ export class UIManager {
       const hold = parseFloat(document.getElementById("setting-hold").value) || 0.45;
       const readyCountdown = Math.min(10, Math.max(3, parseInt(document.getElementById("setting-ready-countdown").value, 10) || 5));
       const movementProfile = document.getElementById("setting-movement-profile").value;
-      const newTeacherPin = document.getElementById("setting-pin").value.trim();
 
       const updatedSettings = {
         timerSeconds: timer,
@@ -756,9 +809,7 @@ export class UIManager {
         shuffleOptions: document.getElementById("setting-shuffle-options").checked,
         basePoints: parseInt(document.getElementById("setting-base-points").value, 10) || 100
       };
-      if (newTeacherPin) updatedSettings.teacherPin = newTeacherPin;
       StorageManager.saveSettings(updatedSettings);
-      document.getElementById("setting-pin").value = "";
 
       this.gesture.setThresholds({
         confidence: conf,
@@ -804,7 +855,7 @@ export class UIManager {
     document.getElementById("btn-cancel-edit-banner").addEventListener("click", cancelEditHandler);
 
     // Form Add / Update Question
-    document.getElementById("form-add-question").addEventListener("submit", (e) => {
+    document.getElementById("form-add-question").addEventListener("submit", async (e) => {
       e.preventDefault();
       this.audio.playClick();
 
@@ -841,32 +892,28 @@ export class UIManager {
           : { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" }
       };
 
-      if (editId) {
-        FirestoreManager.updateQuestion(editId, questionData).then(() => {
-          this.syncQuestionsFromFirestore(false);
-        }).catch(() => {
-          StorageManager.updateCustomQuestion(editId, questionData);
-          this.renderCustomQuestionsList();
-        });
-        alert("Soal berhasil diperbarui di Bank Soal (Tersinkron Cloud Firestore & Lokal)!");
-      } else {
-        FirestoreManager.saveQuestion(questionData).then(() => {
-          this.syncQuestionsFromFirestore(false);
-        }).catch(() => {
-          StorageManager.saveCustomQuestion(questionData);
-          this.renderCustomQuestionsList();
-        });
-        alert("Soal berhasil ditambahkan ke Bank Soal (Tersimpan ke Cloud Firestore & Lokal)!");
+      const submitButton = document.getElementById("btn-submit-question");
+      submitButton.disabled = true;
+      submitButton.textContent = "Mengirim...";
+      try {
+        if (editId) {
+          if (!this.authStatus.isAdmin) throw new Error("Hanya super admin yang dapat mengubah soal yang sudah terbit.");
+          await FirestoreManager.updateQuestion(editId, questionData);
+          await this.syncQuestionsFromFirestore(false);
+          alert("Perubahan soal berhasil diterbitkan.");
+        } else {
+          await FirestoreManager.submitQuestionForReview(questionData, this.authStatus.profile);
+          alert("Soal berhasil dikirim. Super admin akan meninjau sebelum soal diterbitkan.");
+        }
+        this.resetQuestionForm();
+        this.activateStudioTab("tab-my-submissions");
+        await this.renderMySubmissions();
+      } catch (error) {
+        alert(error.message || "Soal belum dapat dikirim.");
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Kirim untuk Review ✅";
       }
-
-      this.resetQuestionForm();
-      // Switch back to questions list
-      document.querySelectorAll(".modal-tabs .tab-btn").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-      const listTabBtn = document.querySelector('.modal-tabs .tab-btn[data-tab="tab-custom-questions"]');
-      if (listTabBtn) listTabBtn.classList.add("active");
-      document.getElementById("tab-custom-questions").classList.add("active");
-      this.renderCustomQuestionsList();
     });
 
     // Import JSON File Listener with Schema Validation
@@ -939,6 +986,47 @@ export class UIManager {
       link.download = "template_soal_motion_smart_class.csv";
       link.click();
     });
+
+    const excelInput = document.getElementById("import-excel-input");
+    excelInput?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const feedbackBox = document.getElementById("import-feedback-box");
+      feedbackBox.classList.remove("hidden", "success", "error");
+      if (file.size > 10 * 1024 * 1024) {
+        feedbackBox.classList.add("error");
+        feedbackBox.textContent = "⚠️ File Excel terlalu besar. Maksimum 10 MB.";
+        excelInput.value = "";
+        return;
+      }
+      feedbackBox.textContent = "Membaca workbook Excel...";
+      try {
+        const questions = await readQuestionWorkbook(await file.arrayBuffer());
+        const result = StorageManager.importCustomQuestions(questions);
+        feedbackBox.classList.add(result.success ? "success" : "error");
+        feedbackBox.textContent = result.success
+          ? `✅ Impor Excel berhasil: ${result.importedCount} soal baru ditambahkan.`
+          : `⚠️ Impor Excel gagal: ${result.error}`;
+        if (result.success) this.renderCustomQuestionsList();
+      } catch (error) {
+        feedbackBox.classList.add("error");
+        feedbackBox.textContent = `⚠️ Workbook tidak dapat dibaca: ${error.message}`;
+      } finally {
+        excelInput.value = "";
+      }
+    });
+
+    const exportExcel = async (bookType) => {
+      try {
+        const questions = StorageManager.getCustomQuestions();
+        const workbookData = await createQuestionWorkbook(questions, bookType);
+        downloadWorkbook(workbookData, `soal_motion_smart_class.${bookType}`);
+      } catch (error) {
+        alert(`Ekspor Excel gagal: ${error.message}`);
+      }
+    };
+    document.getElementById("btn-export-xlsx")?.addEventListener("click", () => exportExcel("xlsx"));
+    document.getElementById("btn-export-xls")?.addEventListener("click", () => exportExcel("xls"));
 
     document.getElementById("form-session-package")?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -2832,46 +2920,156 @@ export class UIManager {
   // ==========================================
   // TEACHER MODE MODAL LOGIC
   // ==========================================
+  initAuthObserver() {
+    if (!isFirebaseConfigured()) {
+      this.updateAccountUI();
+      return;
+    }
+    this.stopAuthObserver = observeAuthState((status) => {
+      this.authStatus = status;
+      this.updateAccountUI();
+      if (!document.getElementById("teacher-modal").classList.contains("hidden")) this.openTeacherModal();
+    });
+  }
+
+  openAccountModal() {
+    document.getElementById("account-modal").classList.remove("hidden");
+    this.updateAccountUI();
+  }
+
+  closeAccountModal() {
+    document.getElementById("account-modal").classList.add("hidden");
+  }
+
+  async handleGoogleLogin() {
+    const feedback = document.getElementById("account-login-feedback");
+    const role = document.querySelector('input[name="login-role"]:checked')?.value || "student";
+    feedback.textContent = "Membuka Google Sign-In...";
+    try {
+      this.authStatus = await signInWithGoogle(role);
+      feedback.textContent = "Berhasil masuk.";
+      this.updateAccountUI();
+    } catch (error) {
+      feedback.textContent = `Gagal masuk: ${error.message || "Google Sign-In dibatalkan."}`;
+    }
+  }
+
+  async handleAccountLogout() {
+    await signOutFirebaseUser();
+    await ensureAnonymousAuth().catch(() => null);
+    this.closeAccountModal();
+  }
+
+  updateAccountUI() {
+    const status = this.authStatus;
+    const isAccount = Boolean(status.user && !status.user.isAnonymous && status.profile);
+    document.getElementById("account-signed-out").classList.toggle("hidden", isAccount);
+    document.getElementById("account-signed-in").classList.toggle("hidden", !isAccount);
+    const label = document.getElementById("account-button-label");
+    label.textContent = isAccount ? (status.profile.displayName?.split(" ")[0] || "Akun") : "Masuk";
+    document.getElementById("studio-button-label").textContent = status.isAdmin ? "Admin" : (status.isTeacher ? "Guru" : "Studio");
+    if (!isAccount) return;
+
+    const roleLabel = { student: "Siswa", teacher: "Guru", super_admin: "Super Admin", owner: "Pemilik" }[status.role] || "Pengguna";
+    const photoUrl = safeImageUrl(status.profile.photoURL);
+    document.getElementById("account-profile-card").innerHTML = `
+      ${photoUrl ? `<img src="${escapeHTML(photoUrl)}" alt="Foto profil ${escapeHTML(status.profile.displayName || "pengguna")}" referrerpolicy="no-referrer" />` : `<div class="profile-avatar-fallback">${escapeHTML((status.profile.displayName || "P").charAt(0).toUpperCase())}</div>`}
+      <div><span class="role-badge role-${escapeHTML(status.role)}">${escapeHTML(roleLabel)}</span><h3>${escapeHTML(status.profile.displayName || "Pengguna")}</h3><p>${escapeHTML(status.profile.email || "")}</p></div>`;
+    this.renderAccountHistory();
+  }
+
+  async renderAccountHistory() {
+    const container = document.getElementById("account-history-list");
+    if (!container || !this.authStatus.profile) return;
+    container.innerHTML = "<p>Memuat riwayat...</p>";
+    const sessions = await FirestoreManager.fetchMyGameSessions(10);
+    container.innerHTML = sessions.length ? sessions.map((session) => `
+      <div class="history-row"><div><strong>${escapeHTML(session.mode || "Permainan")}</strong><small>${new Date(session.date).toLocaleString("id-ID")}</small></div><div><strong>${Number(session.score) || 0} poin</strong><small>${Number(session.accuracy) || 0}% akurasi</small></div></div>
+    `).join("") : '<div class="empty-list-msg"><p>Belum ada riwayat bermain di akun ini.</p></div>';
+  }
+
+  activateStudioTab(tabId) {
+    const dashboard = document.getElementById("teacher-dashboard-section");
+    dashboard.querySelectorAll(".modal-tabs .tab-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
+    dashboard.querySelectorAll(":scope > .tab-content").forEach((content) => content.classList.toggle("active", content.id === tabId));
+  }
+
+  configureStudioAccess() {
+    const { isTeacher, isAdmin } = this.authStatus;
+    document.querySelectorAll("#teacher-dashboard-section .tab-btn[data-access]").forEach((button) => {
+      const allowed = button.dataset.access === "account" || (button.dataset.access === "teacher" && isTeacher) || (button.dataset.access === "admin" && isAdmin);
+      button.classList.toggle("hidden", !allowed);
+    });
+    document.getElementById("teacher-modal-title").textContent = isAdmin ? "🛡️ ADMIN STUDIO & REVIEW SOAL" : (isTeacher ? "👨‍🏫 TEACHER STUDIO" : "🎒 STUDIO SISWA");
+    document.getElementById("btn-seed-firestore")?.classList.toggle("hidden", !isAdmin);
+  }
+
   openTeacherModal() {
     const modal = document.getElementById("teacher-modal");
     modal.classList.remove("hidden");
-    document.getElementById("teacher-pin-section").classList.remove("hidden");
-    document.getElementById("teacher-dashboard-section").classList.add("hidden");
-    document.getElementById("pin-error-msg").classList.add("hidden");
-    document.getElementById("teacher-pin-input").value = "";
-    document.getElementById("teacher-pin-input").focus();
+    const hasAccount = Boolean(this.authStatus.user && !this.authStatus.user.isAnonymous && this.authStatus.profile);
+    document.getElementById("teacher-pin-section").classList.toggle("hidden", hasAccount);
+    document.getElementById("teacher-dashboard-section").classList.toggle("hidden", !hasAccount);
+    if (hasAccount) {
+      this.configureStudioAccess();
+      this.activateStudioTab("tab-add-question");
+      this.resetQuestionForm();
+    }
   }
 
   closeTeacherModal() {
     document.getElementById("teacher-modal").classList.add("hidden");
   }
 
-  handleTeacherLogin() {
-    const pin = document.getElementById("teacher-pin-input").value.trim();
-    const settings = StorageManager.getSettings();
-    const error = document.getElementById("pin-error-msg");
+  renderSubmissionCard(submission, { review = false } = {}) {
+    const question = submission.question || {};
+    const statusLabel = { pending: "Menunggu review", approved: "Disetujui", rejected: "Ditolak" }[submission.status] || submission.status;
+    return `<article class="submission-card">
+      <div class="submission-card-head"><div><span class="submission-status status-${escapeHTML(submission.status || "pending")}">${escapeHTML(statusLabel)}</span><h4>${escapeHTML(question.question || "Soal tanpa judul")}</h4></div><small>${new Date(submission.submittedAt).toLocaleString("id-ID")}</small></div>
+      <p class="submission-meta">${escapeHTML(question.category || "-")} · Kelas ${Number(question.grade) || "-"} · ${escapeHTML(question.topic || "-")}${review ? ` · oleh ${escapeHTML(submission.ownerName || "Pengguna")} (${escapeHTML(submission.ownerRole || "-")})` : ""}</p>
+      <ol class="submission-options">${(question.options || []).map((option, index) => `<li class="${index === question.correctAnswer ? "correct" : ""}">${escapeHTML(option)}</li>`).join("")}</ol>
+      ${submission.reviewNote ? `<p class="review-note"><strong>Catatan reviewer:</strong> ${escapeHTML(submission.reviewNote)}</p>` : ""}
+      ${review && submission.status === "pending" ? `<div class="submission-review-actions"><button class="primary-btn btn-sm approve-submission" data-id="${escapeHTML(submission.id)}">Setujui & Terbitkan</button><button class="secondary-btn btn-sm reject-submission" data-id="${escapeHTML(submission.id)}">Tolak</button></div>` : ""}
+    </article>`;
+  }
 
-    if (!settings.teacherPin) {
-      if (pin.length < 4) {
-        error.textContent = "Buat PIN guru baru dengan minimal 4 karakter.";
-        error.classList.remove("hidden");
-        return;
-      }
-      StorageManager.saveSettings({ teacherPin: pin });
-      settings.teacherPin = pin;
+  async renderMySubmissions() {
+    const container = document.getElementById("my-submissions-list");
+    if (!container) return;
+    container.innerHTML = "<p>Memuat kontribusi...</p>";
+    try {
+      const submissions = await FirestoreManager.fetchQuestionSubmissions({ mine: true });
+      container.innerHTML = submissions.length ? submissions.map((item) => this.renderSubmissionCard(item)).join("") : '<div class="empty-list-msg"><p>Belum ada soal yang Anda kirim.</p></div>';
+    } catch (error) {
+      container.innerHTML = `<div class="empty-list-msg"><p>Kontribusi belum dapat dimuat: ${escapeHTML(error.message || "akses ditolak")}</p></div>`;
     }
+  }
 
-    if (pin === settings.teacherPin) {
-      this.audio.playCorrect();
-      document.getElementById("teacher-pin-section").classList.add("hidden");
-      document.getElementById("teacher-dashboard-section").classList.remove("hidden");
-      this.updateFirestoreStatusUI();
-      this.renderCustomQuestionsList();
-      this.renderTeamsEditor();
-    } else {
-      this.audio.playWrong();
-      error.textContent = "PIN guru tidak cocok.";
-      error.classList.remove("hidden");
+  async renderReviewSubmissions() {
+    const container = document.getElementById("review-submissions-list");
+    if (!container || !this.authStatus.isAdmin) return;
+    container.innerHTML = "<p>Memuat antrean review...</p>";
+    try {
+      const submissions = await FirestoreManager.fetchQuestionSubmissions({ status: "pending" });
+      container.innerHTML = submissions.length ? submissions.map((item) => this.renderSubmissionCard(item, { review: true })).join("") : '<div class="empty-list-msg"><p>Antrean review sudah kosong.</p></div>';
+      container.querySelectorAll(".approve-submission, .reject-submission").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const decision = button.classList.contains("approve-submission") ? "approved" : "rejected";
+          if (!confirm(decision === "approved" ? "Setujui dan terbitkan soal ini ke bank soal?" : "Tolak pengajuan soal ini?")) return;
+          const note = prompt("Catatan review (opsional):", "") || "";
+          button.disabled = true;
+          try {
+            await FirestoreManager.reviewQuestionSubmission(button.dataset.id, decision, note);
+            await this.renderReviewSubmissions();
+            if (decision === "approved") await this.syncQuestionsFromFirestore(false);
+          } catch (error) {
+            alert(error.message || "Review belum dapat disimpan.");
+            button.disabled = false;
+          }
+        });
+      });
+    } catch (error) {
+      container.innerHTML = `<div class="empty-list-msg"><p>Antrean belum dapat dimuat: ${escapeHTML(error.message || "akses ditolak")}</p></div>`;
     }
   }
 
@@ -2946,10 +3144,10 @@ export class UIManager {
               <span style="font-size: 0.75rem; background: #FEF3C7; color: #92400E; padding: 2px 8px; border-radius: 4px; font-weight:700;">⭐ ${q.pointWeight || 100} pts</span>
               <span style="font-size: 0.78rem; font-weight: 800; color: var(--text-secondary);">${escapeHTML(q.topic || "Materi")}</span>
             </div>
-            <div style="display:flex; gap: 6px;">
+            ${this.authStatus.isAdmin ? `<div style="display:flex; gap: 6px;">
               <button class="edit-q-btn" data-id="${escapeHTML(q.id)}">✏️ Edit</button>
               <button class="delete-q-btn" data-id="${escapeHTML(q.id)}">🗑️ Hapus</button>
-            </div>
+            </div>` : ""}
           </div>
           ${q.passage ? `<p style="font-size: 0.85rem; color: #78350F; background: #FFFBEB; padding: 6px 10px; border-radius: 4px; margin-top: 6px; font-style: italic;">"${escapeHTML(q.passage)}"</p>` : ""}
           ${this.renderQuestionImage(q, "question-media-thumb")}
@@ -3085,7 +3283,7 @@ export class UIManager {
     if (banner) banner.classList.add("hidden");
 
     const submitBtn = document.getElementById("btn-submit-question");
-    if (submitBtn) submitBtn.textContent = "Simpan Soal ke Bank Data 💾";
+    if (submitBtn) submitBtn.textContent = "Kirim untuk Review ✅";
 
     const cancelBtn = document.getElementById("btn-cancel-edit");
     if (cancelBtn) cancelBtn.classList.add("hidden");
@@ -3318,6 +3516,13 @@ export class UIManager {
             </div>
             <div style="font-size: 0.85rem; background: #F1F5F9; padding: 4px 10px; border-radius: 4px;">⚡ ${s.avgResponseTimeSec || 0}s</div>
           </div>
+          ${Array.isArray(s.participantResults) && s.participantResults.length ? `
+            <details class="multiplayer-report-details" style="flex-basis:100%;">
+              <summary>📋 Laporan Room ${escapeHTML(s.roomCode || "")} · ${s.participantResults.length} peserta</summary>
+              <div class="multiplayer-report-grid">
+                ${s.participantResults.map((participant, index) => `<div><span>#${index + 1} ${escapeHTML(participant.name)}</span><small>${participant.participantType === "group" ? "Kelompok" : "Siswa"} · ${Number(participant.correctCount) || 0} benar · ${(Number(participant.score) || 0).toLocaleString()} poin</small></div>`).join("")}
+              </div>
+            </details>` : ""}
         </div>
       `
         )
@@ -3424,7 +3629,8 @@ export class UIManager {
     }
 
     document.getElementById("btn-fb-teacher-login")?.addEventListener("click", () => {
-      this.loginFirebaseTeacherUI();
+      this.closeTeacherModal();
+      this.openAccountModal();
     });
     document.getElementById("btn-fb-teacher-logout")?.addEventListener("click", async () => {
       await signOutFirebaseUser();
@@ -3433,34 +3639,20 @@ export class UIManager {
     });
   }
 
-  async loginFirebaseTeacherUI() {
-    const feedback = document.getElementById("fb-teacher-auth-feedback");
-    const email = document.getElementById("fb-teacher-email")?.value.trim();
-    const password = document.getElementById("fb-teacher-password")?.value || "";
-    if (!feedback || !email || !password) {
-      if (feedback) feedback.textContent = "Isi email dan password guru.";
-      return;
-    }
-    feedback.textContent = "Memverifikasi akun guru...";
-    try {
-      await signInTeacher(email, password);
-      document.getElementById("fb-teacher-password").value = "";
-      await this.updateTeacherAuthUI();
-    } catch (error) {
-      feedback.textContent = `❌ ${error.message || "Autentikasi gagal."}`;
-    }
-  }
-
   async updateTeacherAuthUI() {
     const feedback = document.getElementById("fb-teacher-auth-feedback");
     if (!feedback) return;
-    const status = await getTeacherAuthStatus();
-    if (status.isTeacher) {
-      feedback.textContent = `✅ Terautentikasi sebagai guru: ${status.user.email}`;
+    const status = await getAuthStatus();
+    if (status.isAdmin) {
+      feedback.textContent = `✅ Hak review aktif (${status.role}): ${status.user.email}`;
+    } else if (status.isTeacher) {
+      feedback.textContent = `✅ Masuk sebagai guru: ${status.user.email}`;
+    } else if (status.profile) {
+      feedback.textContent = `ℹ️ Masuk sebagai siswa: ${status.user.email}`;
     } else if (status.user?.isAnonymous) {
-      feedback.textContent = "ℹ️ Perangkat masuk sebagai siswa anonim. Login guru diperlukan untuk menulis data cloud.";
+      feedback.textContent = "ℹ️ Perangkat masih menggunakan sesi tamu anonim.";
     } else {
-      feedback.textContent = "Belum masuk sebagai guru.";
+      feedback.textContent = "Belum masuk dengan Google.";
     }
   }
 
@@ -3997,6 +4189,7 @@ export class UIManager {
         <div class="mp-player-chip animate-scale-up">
           <span class="mp-chip-avatar">${escapeHTML(p.avatar || '🦁')}</span>
           <span class="mp-chip-name">${escapeHTML(p.name)}</span>
+          <span class="role-badge">${p.participantType === "group" ? "Kelompok" : "Siswa"}</span>
           <span class="mp-chip-ready">✓ Siap</span>
         </div>
       `).join("");
@@ -4030,8 +4223,14 @@ export class UIManager {
             </div>
 
             <div class="form-group" style="margin-top:14px;">
-              <label>NAMA PANGGILAN SISWA:</label>
-              <input type="text" id="mp-input-name" maxlength="15" placeholder="Masukkan namamu (Contoh: Budi)" style="font-size:1.15rem; font-weight:700;">
+              <label>BERGABUNG SEBAGAI:</label>
+              <select id="mp-participant-type" style="font-size:1.05rem; font-weight:700;"><option value="student">Siswa / individu</option><option value="group">Kelompok / tim</option></select>
+            </div>
+
+            <div class="form-group" style="margin-top:14px;">
+              <label id="mp-name-label">NAMA PANGGILAN SISWA:</label>
+              <input type="text" id="mp-input-name" maxlength="40" placeholder="Contoh: Budi" autocomplete="off" style="font-size:1.15rem; font-weight:700;">
+              <small>Nama hanya dikirim ke room dan laporan guru. Perangkat peserta tidak menyimpannya sebagai riwayat.</small>
             </div>
 
             <div class="form-group" style="margin-top:14px;">
@@ -4060,6 +4259,12 @@ export class UIManager {
       this.game.setState(GAME_STATES.MULTIPLAYER_HUB);
     });
 
+    document.getElementById("mp-participant-type")?.addEventListener("change", (event) => {
+      const isGroup = event.target.value === "group";
+      document.getElementById("mp-name-label").textContent = isGroup ? "NAMA KELOMPOK / TIM:" : "NAMA PANGGILAN SISWA:";
+      document.getElementById("mp-input-name").placeholder = isGroup ? "Contoh: Kelompok Garuda" : "Contoh: Budi";
+    });
+
     // Avatar selector
     const avatarBtns = document.querySelectorAll(".mp-avatar-btn");
     avatarBtns.forEach((btn) => {
@@ -4074,7 +4279,8 @@ export class UIManager {
     // Submit Join
     const submitJoin = async () => {
       const pin = document.getElementById("mp-input-pin").value.trim().toUpperCase();
-      const name = document.getElementById("mp-input-name").value.trim() || "Siswa";
+      const participantType = document.getElementById("mp-participant-type").value;
+      const name = document.getElementById("mp-input-name").value.trim() || (participantType === "group" ? "Kelompok" : "Siswa");
       const errBox = document.getElementById("mp-join-error");
 
       if (!pin) {
@@ -4087,7 +4293,7 @@ export class UIManager {
       this.audio.playClick();
 
       try {
-        await this.multiplayer.joinRoom(pin, { name, avatar: selectedAvatar });
+        await this.multiplayer.joinRoom(pin, { name, avatar: selectedAvatar, participantType });
         this.audio.playVictory();
         this.game.setState(GAME_STATES.MULTIPLAYER_PLAYER_LOBBY);
       } catch (err) {
@@ -4116,7 +4322,7 @@ export class UIManager {
       <div class="screen-mp-player-lobby animate-fade-in">
         <div class="mp-player-lobby-card">
           <div class="mp-player-badge-top">${avatar}</div>
-          <h2>Halo, ${name}!</h2>
+          <h2>${this.multiplayer.localParticipantType === "group" ? "Halo, Kelompok" : "Halo"}, ${escapeHTML(name)}!</h2>
           <p class="mp-joined-room-text">Kamu terhubung ke Room: <strong>${room ? room.roomCode : '...'}</strong></p>
 
           <div class="mp-player-status-box">
@@ -4542,6 +4748,7 @@ export class UIManager {
 
   // 8. MULTIPLAYER PODIUM (FINAL CELEBRATION)
   renderMultiplayerPodium(container) {
+    const room = this.multiplayer.currentRoom;
     const leaderboard = this.multiplayer.getLeaderboard();
     const winner1 = leaderboard[0] || { name: "-", avatar: "🥇", score: 0 };
     const winner2 = leaderboard[1] || { name: "-", avatar: "🥈", score: 0 };
@@ -4554,6 +4761,13 @@ export class UIManager {
       origin: { y: 0.55 }
     });
     this.audio.playVictory();
+
+    if (this.multiplayer.isHost && room && !this.reportedMultiplayerRooms.has(room.roomCode)) {
+      this.reportedMultiplayerRooms.add(room.roomCode);
+      this.saveMultiplayerTeacherReport(room, leaderboard).catch((error) => {
+        console.warn("[Multiplayer] Laporan guru belum dapat disimpan:", error);
+      });
+    }
 
     container.innerHTML = `
       <div class="screen-mp-podium animate-fade-in">
@@ -4601,7 +4815,7 @@ export class UIManager {
               <div class="mp-full-row">
                 <span class="mp-full-rank">#${idx + 1}</span>
                 <span class="mp-full-avatar">${escapeHTML(p.avatar || '🦁')}</span>
-                <span class="mp-full-name">${escapeHTML(p.name)}</span>
+                <span class="mp-full-name">${escapeHTML(p.name)} <small>(${p.participantType === "group" ? "Kelompok" : "Siswa"})</small></span>
                 <span class="mp-full-correct">Jawaban Benar: ${p.correctCount || 0}</span>
                 <span class="mp-full-score">${p.score.toLocaleString()} PTS</span>
               </div>
@@ -4621,6 +4835,31 @@ export class UIManager {
       this.audio.playClick();
       this.multiplayer.leaveRoom();
       this.game.setState(GAME_STATES.HOME);
+    });
+  }
+
+  async saveMultiplayerTeacherReport(room, leaderboard) {
+    const participants = leaderboard.map((participant) => ({
+      name: participant.name,
+      participantType: participant.participantType,
+      score: participant.score,
+      correctCount: participant.correctCount
+    }));
+    const totalCorrect = participants.reduce((sum, participant) => sum + participant.correctCount, 0);
+    const totalAnswers = participants.length * (room.questions?.length || 0);
+    await FirestoreManager.recordGameSession({
+      id: `room-report-${room.roomCode}-${Date.now()}`,
+      date: new Date().toISOString(),
+      mode: "multiplayer_classroom",
+      category: room.settings?.category || "campuran",
+      grade: room.settings?.grade || "all",
+      score: participants.reduce((sum, participant) => sum + participant.score, 0),
+      correctCount: totalCorrect,
+      wrongCount: Math.max(0, totalAnswers - totalCorrect),
+      totalQuestions: totalAnswers,
+      accuracy: totalAnswers ? Math.round((totalCorrect / totalAnswers) * 100) : 0,
+      roomCode: room.roomCode,
+      participantResults: participants
     });
   }
 }

@@ -16,6 +16,15 @@ globalThis.localStorage = (() => {
     clear: () => { store = {}; }
   };
 })();
+globalThis.sessionStorage = (() => {
+  let store = {};
+  return {
+    getItem: (key) => store[key] || null,
+    setItem: (key, value) => { store[key] = String(value); },
+    removeItem: (key) => { delete store[key]; },
+    clear: () => { store = {}; }
+  };
+})();
 
 async function runTests() {
   console.log("=== RUNNING MOTION SMART CLASS TEST SUITE ===");
@@ -86,6 +95,35 @@ async function runTests() {
   assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
   console.log("✓ importQuestionsFromCSV: PASS");
 
+  const { createQuestionWorkbook, readQuestionWorkbook } = await import("../src/utils/questionSpreadsheet.js");
+  const excelFixture = [{
+    id: "excel-roundtrip-1",
+    question: "Berapakah setengah dari 10?",
+    options: ["2", "5", "8", "10"],
+    correctAnswer: 1,
+    category: "numerasi",
+    grade: 3,
+    difficulty: "easy",
+    topic: "Pembagian",
+    imageUrl: "https://images.example.edu/halves.png",
+    imageAlt: "Sepuluh benda dibagi dua kelompok",
+    imageLayout: "compact",
+    timeLimit: 35,
+    pointWeight: 120,
+    explanation: "Setengah dari sepuluh adalah lima."
+  }];
+  for (const format of ["xlsx", "xls"]) {
+    const workbookData = await createQuestionWorkbook(excelFixture, format);
+    const parsedExcel = await readQuestionWorkbook(workbookData);
+    assert.strictEqual(parsedExcel.length, 1);
+    assert.strictEqual(parsedExcel[0].question, excelFixture[0].question);
+    assert.deepStrictEqual(parsedExcel[0].options, excelFixture[0].options);
+    assert.strictEqual(parsedExcel[0].correctAnswer, 1);
+    assert.strictEqual(parsedExcel[0].grade, 3);
+    assert.strictEqual(parsedExcel[0].imageLayout, "compact");
+  }
+  console.log("✓ XLS/XLSX question workbook round-trip: PASS");
+
   const savedPackage = StorageManager.saveSessionPackage({ name: "Pecahan Kelas 4", mode: "cooperative", count: 10 });
   assert.strictEqual(savedPackage.mode, "cooperative");
   assert.ok(StorageManager.getSessionPackages().some((pkg) => pkg.id === savedPackage.id));
@@ -117,6 +155,10 @@ async function runTests() {
   assert.ok(!firestoreRules.includes("allow write: if true"), "Firestore must not expose public writes");
   assert.ok(firestoreRules.includes("msc_room_secrets"), "Answer keys need a teacher-only collection");
   assert.ok(firestoreRules.includes("isOwnPlayerUpdate"), "Player updates must be scoped to their Firebase UID");
+  assert.ok(firestoreRules.includes("question_submissions"), "Question contributions need a moderated collection");
+  assert.ok(firestoreRules.includes("isAdmin() && validQuestion()"), "Only an admin may publish questions");
+  assert.ok(firestoreRules.includes("request.resource.data.role in ['student', 'teacher']"), "Self-service login roles must not include admin roles");
+  assert.ok(firestoreRules.includes("request.resource.data.status in ['approved', 'rejected']"), "Moderation decisions must be constrained");
   console.log("✓ Firestore security invariants: PASS");
 
   // 2. Test QuestionEngine
@@ -370,6 +412,18 @@ async function runTests() {
   // 9. Test Cloud Firestore Integration (Bank Soal & Riwayat Permainan)
   console.log("\n[9] Testing Cloud Firestore Integration (Bank Soal & Riwayat Permainan)...");
   const { FirestoreManager } = await import("../src/engine/FirestoreManager.js");
+  const sanitizedQuestion = FirestoreManager.sanitizeQuestion({
+    question: "  Berapa 2 + 2?  ",
+    options: ["3", "4", "5", "6", "7"],
+    correctAnswer: 1,
+    grade: 99,
+    imageUrl: "javascript:alert(1)"
+  });
+  assert.strictEqual(sanitizedQuestion.question, "Berapa 2 + 2?");
+  assert.strictEqual(sanitizedQuestion.options.length, 4);
+  assert.strictEqual(sanitizedQuestion.grade, 6);
+  assert.strictEqual(sanitizedQuestion.imageUrl, "");
+  console.log("✓ Moderated question sanitization: PASS");
   const { isFirebaseConfigured, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator
@@ -430,6 +484,8 @@ async function runTests() {
   assert.strictEqual(cleanSession.cameraFrame, undefined, "Strict Privacy: cameraFrame stripped before storing");
   assert.strictEqual(cleanSession.score, 850);
   assert.strictEqual(cleanSession.accuracy, 80);
+  assert.ok(sessionStorage.getItem("MSC_ANALYTICS_HISTORY_GUEST"), "Anonymous history must use temporary session storage");
+  assert.strictEqual(localStorage.getItem("MSC_ANALYTICS_HISTORY_GUEST"), null, "Anonymous history must not persist in localStorage");
   console.log("✓ FirestoreManager.recordGameSession (Privacy & Non-Biometric Sanitization): PASS");
 
   // Test QuestionEngine merging with Firestore questions
@@ -495,13 +551,15 @@ async function runTests() {
   // Student joins Room
   const studentEngine = new MultiplayerEngine();
   const joinedRoom = await studentEngine.joinRoom(room.roomCode, {
-    name: "Rian",
-    avatar: "🦁"
+    name: "Kelompok Garuda",
+    avatar: "🦁",
+    participantType: "group"
   });
 
   assert.ok(joinedRoom.players[studentEngine.localPlayerId], "Student must be added to room players");
-  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].name, "Rian");
+  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].name, "Kelompok Garuda");
   assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].avatar, "🦁");
+  assert.strictEqual(joinedRoom.players[studentEngine.localPlayerId].participantType, "group");
   assert.strictEqual(studentEngine.isHost, false);
   console.log("✓ studentEngine.joinRoom: PASS");
 
@@ -532,7 +590,8 @@ async function runTests() {
   // Leaderboard sorting
   const lb = hostEngine.getLeaderboard();
   assert.ok(Array.isArray(lb));
-  assert.strictEqual(lb[0].name, "Rian");
+  assert.strictEqual(lb[0].name, "Kelompok Garuda");
+  assert.strictEqual(lb[0].participantType, "group");
   assert.ok(lb[0].score > 0);
   assert.strictEqual(lb[0].isCorrect, true);
   console.log("✓ hostEngine.getLeaderboard: PASS");
@@ -548,6 +607,7 @@ async function runTests() {
   studentEngine.leaveRoom();
   assert.strictEqual(hostEngine.currentRoom, null);
   assert.strictEqual(studentEngine.currentRoom, null);
+  assert.strictEqual(sessionStorage.getItem(`MSC_ROOM_${room.roomCode}`), null, "Participant room cache must be cleared after leaving");
   console.log("✓ Room cleanup & leaveRoom: PASS");
 
   console.log("\n==========================================");
