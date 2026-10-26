@@ -95,6 +95,10 @@ export class PoseDetector {
     this.loopToken = 0;
     this.readyFrameCount = 0;
     this.modelMode = "loading";
+    this.hasReceivedResults = false;
+    this.consecutiveInferenceErrors = 0;
+    this.modelFailureReported = false;
+    this.detectionStartedAt = 0;
 
     // Latest landmarks
     this.latestLandmarks = null;
@@ -138,7 +142,7 @@ export class PoseDetector {
         });
 
         this.isModelLoaded = true;
-        this.modelMode = "mediapipe";
+        this.modelMode = "warming";
         console.log("MediaPipe Pose initialized successfully.");
         return true;
       }
@@ -185,6 +189,10 @@ export class PoseDetector {
     this.frameCount = 0;
     this.fpsTimer = performance.now();
     this.readyFrameCount = 0;
+    this.hasReceivedResults = false;
+    this.consecutiveInferenceErrors = 0;
+    this.modelFailureReported = false;
+    this.detectionStartedAt = performance.now();
 
     this.prevFrameData = null;
     const loopToken = ++this.loopToken;
@@ -206,6 +214,10 @@ export class PoseDetector {
     if (!this.isDetecting || loopToken !== this.loopToken) return;
 
     const now = performance.now();
+    if (!this.hasReceivedResults && !this.modelFailureReported && this.pose && now - this.detectionStartedAt > 12000) {
+      this.consecutiveInferenceErrors = Math.max(2, this.consecutiveInferenceErrors);
+      this.handleInferenceError(new Error("Model pose tidak memberikan hasil inferensi."));
+    }
     if (
       this.videoElement &&
       this.videoElement.readyState >= 2 &&
@@ -227,19 +239,27 @@ export class PoseDetector {
 
         if (this.pose) {
           const inferenceStartedAt = performance.now();
-          this.pose
-            .send({ image: this.videoElement })
-            .catch((err) => {
-              console.warn("Pose send frame error:", err);
-            })
-            .finally(() => {
-              const inferenceDuration = performance.now() - inferenceStartedAt;
-              const targetInterval = inferenceDuration > 80 ? 80 : inferenceDuration > 55 ? 60 : 42;
-              this.minInferenceIntervalMs += (targetInterval - this.minInferenceIntervalMs) * 0.2;
-              // A restarted loop waits for the previous MediaPipe inference to finish,
-              // preventing two sends from racing on the same graph.
-              this.isProcessingFrame = false;
-            });
+          try {
+            Promise.resolve(this.pose.send({ image: this.videoElement }))
+              .catch((error) => this.handleInferenceError(error))
+              .finally(() => {
+                const inferenceDuration = performance.now() - inferenceStartedAt;
+                const targetInterval = inferenceDuration > 80 ? 80 : inferenceDuration > 55 ? 60 : 42;
+                this.minInferenceIntervalMs += (targetInterval - this.minInferenceIntervalMs) * 0.2;
+                // A restarted loop waits for the previous MediaPipe inference to finish,
+                // preventing two sends from racing on the same graph.
+                this.isProcessingFrame = false;
+
+                if (!this.hasReceivedResults && !this.modelFailureReported && performance.now() - this.detectionStartedAt > 10000) {
+                  this.handleInferenceError(new Error("Model pose tidak menghasilkan deteksi setelah 10 detik."));
+                }
+              });
+          } catch (error) {
+            // Some MediaPipe/WASM initialization failures are thrown synchronously.
+            // Always release the frame lock so the loop stays alive and the UI gets a useful error.
+            this.handleInferenceError(error);
+            this.isProcessingFrame = false;
+          }
         } else {
           // Process optical posture fallback
           this.processOpticalFrame();
@@ -254,6 +274,11 @@ export class PoseDetector {
 
   handleResults(results) {
     if (!this.isDetecting) return;
+
+    this.hasReceivedResults = true;
+    this.consecutiveInferenceErrors = 0;
+    this.modelFailureReported = false;
+    if (this.pose) this.modelMode = "mediapipe";
 
     this.frameCount++;
     const frameTime = performance.now();
@@ -304,6 +329,29 @@ export class PoseDetector {
         fps: this.fps,
         calibration,
         detectorMode: this.modelMode
+      });
+    }
+  }
+
+  handleInferenceError(error) {
+    this.consecutiveInferenceErrors += 1;
+    console.warn("Pose inference error:", error);
+    if (this.consecutiveInferenceErrors < 3 || this.modelFailureReported) return;
+
+    this.modelFailureReported = true;
+    this.modelMode = "error";
+    const message = /content security policy|wasm|webassembly/i.test(String(error?.message || error))
+      ? "Model gerakan diblokir oleh keamanan browser. Muat ulang halaman setelah deployment terbaru aktif."
+      : "Model gerakan gagal dimulai. Muat ulang halaman atau gunakan Chrome/Edge terbaru.";
+
+    if (this.onResultsCallback) {
+      this.onResultsCallback({
+        landmarks: null,
+        poseConfidence: 0,
+        fps: this.fps,
+        calibration: this.checkCalibration(null),
+        detectorMode: this.modelMode,
+        detectorError: { message, code: error?.name || "PoseInferenceError" }
       });
     }
   }

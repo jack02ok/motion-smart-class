@@ -873,6 +873,11 @@ body {
   box-shadow: 0 12px 28px rgba(16, 185, 129, .12);
 }
 
+.realtime-calibration-card.state-error {
+  border-color: #EF4444;
+  background: linear-gradient(145deg, #FEF2F2, #FFF7ED);
+}
+
 .realtime-score-ring {
   display: grid;
   place-content: center;
@@ -888,6 +893,7 @@ body {
 .state-adjusting .realtime-score-ring,
 .state-locking .realtime-score-ring { border-color: #FBBF24; }
 .state-ready .realtime-score-ring { border-color: #34D399; }
+.state-error .realtime-score-ring { border-color: #F87171; }
 .realtime-score-ring strong { color: #0F172A; font-size: 1.35rem; line-height: 1; }
 .realtime-score-ring span { margin-top: 4px; color: #64748B; font-size: .65rem; font-weight: 800; text-transform: uppercase; }
 
@@ -1499,6 +1505,7 @@ body {
 .pose-hud-state.locking { color: #FBBF24; }
 .pose-hud-state.adjusting { color: #FB923C; }
 .pose-hud-state.searching { color: #CBD5E1; }
+.pose-hud-state.error { color: #F87171; }
 .pose-hud-quality { font-size: .82rem; font-weight: 900; }
 .pose-hud-meter { height: 5px; margin: 8px 0; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, .15); }
 .pose-hud-meter span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #F59E0B, #2DD4BF); transition: width .16s ease; }
