@@ -16,6 +16,8 @@ import {
   resetFirebaseConfig,
   testFirestoreConnection,
   isFirebaseConfigured,
+  validateFirebaseAuthConfig,
+  describeFirebaseAuthError,
   ensureAnonymousAuth,
   getAuthStatus,
   observeAuthState,
@@ -163,24 +165,27 @@ export class UIManager {
         <!-- ACCOUNT / GOOGLE SIGN-IN MODAL -->
         <div id="account-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
           <div class="modal-card account-modal-card">
-            <div class="modal-header">
-              <div><h2 id="account-modal-title">Akun Motion Smart Class</h2><p class="modal-kicker">Simpan progres bermain dan kontribusi soal Anda di cloud.</p></div>
+            <div class="modal-header account-modal-header">
+              <div class="account-heading"><span class="account-heading-icon" aria-hidden="true">✦</span><div><span class="account-eyebrow">AKUN TERHUBUNG</span><h2 id="account-modal-title">Masuk ke Motion Smart Class</h2><p class="modal-kicker">Simpan progres dan kelola aktivitas belajar dengan aman.</p></div></div>
               <button id="btn-account-close" class="modal-close-btn" aria-label="Tutup akun">&times;</button>
             </div>
-            <div id="account-signed-out">
-              <h3>Pilih peran Anda</h3>
-              <div class="role-choice-grid" role="radiogroup" aria-label="Peran pengguna">
-                <label class="role-choice active"><input type="radio" name="login-role" value="student" checked /><span class="role-icon">🎒</span><strong>Siswa</strong><small>Main, simpan riwayat, dan kirim ide soal.</small></label>
-                <label class="role-choice"><input type="radio" name="login-role" value="teacher" /><span class="role-icon">👨‍🏫</span><strong>Guru</strong><small>Kelola aktivitas kelas dan kirim soal untuk review.</small></label>
+            <div class="account-modal-body">
+              <div id="account-signed-out">
+                <div class="account-section-heading"><span>1</span><div><h3>Pilih peran Anda</h3><p>Peran menentukan ruang kerja yang ditampilkan setelah login.</p></div></div>
+                <div class="role-choice-grid" role="radiogroup" aria-label="Peran pengguna">
+                  <label class="role-choice active"><input type="radio" name="login-role" value="student" checked /><span class="role-icon role-icon-student">🎒</span><span class="role-copy"><strong>Siswa</strong><small>Main, simpan riwayat, dan kirim ide soal.</small></span><span class="role-check" aria-hidden="true">✓</span></label>
+                  <label class="role-choice"><input type="radio" name="login-role" value="teacher" /><span class="role-icon role-icon-teacher">👨‍🏫</span><span class="role-copy"><strong>Guru</strong><small>Kelola kelas dan kirim soal untuk ditinjau.</small></span><span class="role-check" aria-hidden="true">✓</span></label>
+                </div>
+                <div class="account-divider"><span>2</span><strong>Hubungkan akun</strong></div>
+                <button id="btn-google-login" class="google-login-btn" type="button"><span class="google-mark" aria-hidden="true">G</span><span class="google-login-label">Lanjutkan dengan Google</span></button>
+                <div id="account-login-feedback" class="account-feedback hidden" role="status" aria-live="polite"></div>
+                <div class="privacy-note"><span aria-hidden="true">🛡️</span><p><strong>Privasi tetap terjaga.</strong> Anda dapat bermain tanpa login; riwayat tamu hanya tersedia selama tab ini terbuka. Rekaman kamera dan data biometrik tidak pernah disimpan.</p></div>
               </div>
-              <button id="btn-google-login" class="google-login-btn" type="button"><span aria-hidden="true">G</span> Lanjutkan dengan Google</button>
-              <p id="account-login-feedback" class="account-feedback" aria-live="polite"></p>
-              <p class="privacy-note">Anda tetap dapat bermain tanpa login. Riwayat tamu hanya tersedia selama sesi tab ini; login Google diperlukan untuk menyimpan riwayat. Motion Smart Class tidak menyimpan rekaman kamera atau data biometrik.</p>
-            </div>
-            <div id="account-signed-in" class="hidden">
-              <div id="account-profile-card" class="account-profile-card"></div>
-              <div class="account-actions"><button id="btn-account-studio" class="primary-btn">Buka Studio & Kontribusi</button><button id="btn-account-logout" class="secondary-btn">Keluar</button></div>
-              <section class="account-history"><div class="feature-panel-header"><div><h3>Riwayat Bermain Saya</h3><p>Riwayat ini terhubung ke UID akun Google Anda.</p></div></div><div id="account-history-list" class="account-history-list"><p>Memuat riwayat...</p></div></section>
+              <div id="account-signed-in" class="hidden">
+                <div id="account-profile-card" class="account-profile-card"></div>
+                <div class="account-actions"><button id="btn-account-studio" class="primary-btn">Buka Studio & Kontribusi</button><button id="btn-account-logout" class="secondary-btn">Keluar</button></div>
+                <section class="account-history"><div class="feature-panel-header"><div><h3>Riwayat Bermain Saya</h3><p>Riwayat ini terhubung ke UID akun Google Anda.</p></div></div><div id="account-history-list" class="account-history-list"><p>Memuat riwayat...</p></div></section>
+              </div>
             </div>
           </div>
         </div>
@@ -599,15 +604,15 @@ export class UIManager {
                       </div>
                       <div class="form-group">
                         <label>API Key:</label>
-                        <input type="text" id="fb-input-api-key" placeholder="AIzaSy..." />
+                        <input type="text" id="fb-input-api-key" placeholder="AIzaSy..." required />
                       </div>
                       <div class="form-group">
                         <label>Auth Domain:</label>
-                        <input type="text" id="fb-input-auth-domain" placeholder="project-id.firebaseapp.com" />
+                        <input type="text" id="fb-input-auth-domain" placeholder="project-id.firebaseapp.com" required />
                       </div>
                       <div class="form-group">
                         <label>App ID:</label>
-                        <input type="text" id="fb-input-app-id" placeholder="1:123456789:web:abc..." />
+                        <input type="text" id="fb-input-app-id" placeholder="1:123456789:web:abc..." required />
                       </div>
 
                       <div class="fb-form-actions">
@@ -2921,7 +2926,7 @@ export class UIManager {
   // TEACHER MODE MODAL LOGIC
   // ==========================================
   initAuthObserver() {
-    if (!isFirebaseConfigured()) {
+    if (!validateFirebaseAuthConfig().valid) {
       this.updateAccountUI();
       return;
     }
@@ -2934,6 +2939,19 @@ export class UIManager {
 
   openAccountModal() {
     document.getElementById("account-modal").classList.remove("hidden");
+    const authConfig = validateFirebaseAuthConfig();
+    if (!authConfig.valid) {
+      this.showAccountFeedback({
+        tone: "warning",
+        title: "Login Google belum dikonfigurasi",
+        message: `Data Firebase yang belum lengkap: ${authConfig.missingLabels.join(", ")}.`,
+        action: "Pengelola perlu melengkapi konfigurasi Web App Firebase pada deployment."
+      });
+    } else {
+      const feedback = document.getElementById("account-login-feedback");
+      feedback.replaceChildren();
+      feedback.className = "account-feedback hidden";
+    }
     this.updateAccountUI();
   }
 
@@ -2943,15 +2961,54 @@ export class UIManager {
 
   async handleGoogleLogin() {
     const feedback = document.getElementById("account-login-feedback");
+    const button = document.getElementById("btn-google-login");
+    const label = button.querySelector(".google-login-label");
     const role = document.querySelector('input[name="login-role"]:checked')?.value || "student";
-    feedback.textContent = "Membuka Google Sign-In...";
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    label.textContent = "Membuka Google Sign-In...";
+    feedback.className = "account-feedback hidden";
     try {
       this.authStatus = await signInWithGoogle(role);
-      feedback.textContent = "Berhasil masuk.";
       this.updateAccountUI();
     } catch (error) {
-      feedback.textContent = `Gagal masuk: ${error.message || "Google Sign-In dibatalkan."}`;
+      console.error("[Auth] Google Sign-In failed:", error);
+      this.showAccountFeedback({ tone: "error", ...describeFirebaseAuthError(error) });
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      label.textContent = "Lanjutkan dengan Google";
     }
+  }
+
+  showAccountFeedback({ tone = "info", title, message, action = "", code = "" }) {
+    const feedback = document.getElementById("account-login-feedback");
+    if (!feedback) return;
+    feedback.replaceChildren();
+    feedback.className = `account-feedback account-feedback-${tone}`;
+
+    const icon = document.createElement("span");
+    icon.className = "account-feedback-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = tone === "error" ? "!" : (tone === "warning" ? "i" : "✓");
+    const content = document.createElement("div");
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const description = document.createElement("p");
+    description.textContent = message;
+    content.append(heading, description);
+    if (action) {
+      const hint = document.createElement("small");
+      hint.textContent = action;
+      content.append(hint);
+    }
+    if (code && code !== "auth/unknown") {
+      const technicalCode = document.createElement("code");
+      technicalCode.textContent = code;
+      technicalCode.title = "Kode teknis untuk pengelola aplikasi";
+      content.append(technicalCode);
+    }
+    feedback.append(icon, content);
   }
 
   async handleAccountLogout() {
@@ -3857,6 +3914,15 @@ export class UIManager {
       authDomain,
       appId
     };
+
+    const authConfig = validateFirebaseAuthConfig(config);
+    if (!authConfig.valid) {
+      const feedback = document.getElementById("firebase-test-feedback");
+      feedback.className = "fb-feedback-box feedback-error";
+      feedback.classList.remove("hidden");
+      feedback.textContent = `❌ Belum dapat disimpan. Lengkapi: ${authConfig.missingLabels.join(", ")}.`;
+      return;
+    }
 
     saveFirebaseConfig(config);
     this.audio.playCorrect();

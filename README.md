@@ -133,9 +133,10 @@ npm run check
 
 1. Aktifkan provider **Google** dan **Anonymous** di Firebase Authentication.
 2. Tambahkan domain produksi ke daftar **Authorized domains** Firebase Authentication.
-3. Deploy `firestore.rules` dari repository ini.
-4. Login sekali dengan akun pemilik, lalu ubah field `role` pada `users/{uid}` menjadi `owner` atau `super_admin` melalui Firebase Console/Admin SDK. Client hanya dapat membuat role awal `student` atau `teacher` dan tidak dapat menaikkan hak akses sendiri.
-5. Aktifkan Firebase App Check untuk deployment produksi.
+3. Isi seluruh konfigurasi Web App pada environment deployment: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, dan `VITE_FIREBASE_APP_ID`. `.env.example` hanya contoh dan tidak otomatis dipakai saat build.
+4. Deploy `firestore.rules` dari repository ini.
+5. Login sekali dengan akun pemilik, lalu ubah field `role` pada `users/{uid}` menjadi `owner` atau `super_admin` melalui Firebase Console/Admin SDK. Client hanya dapat membuat role awal `student` atau `teacher` dan tidak dapat menaikkan hak akses sendiri.
+6. Aktifkan Firebase App Check untuk deployment produksi.
 
 Koleksi utama:
 

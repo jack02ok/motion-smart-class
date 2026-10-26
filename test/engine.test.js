@@ -424,12 +424,23 @@ async function runTests() {
   assert.strictEqual(sanitizedQuestion.grade, 6);
   assert.strictEqual(sanitizedQuestion.imageUrl, "");
   console.log("✓ Moderated question sanitization: PASS");
-  const { isFirebaseConfigured, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
+  const { isFirebaseConfigured, validateFirebaseAuthConfig, describeFirebaseAuthError, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator
   assert.strictEqual(isFirebaseConfigured({ projectId: "" }), false, "Empty projectId is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "your-project-id" }), false, "Placeholder is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "msc-sd-negeri-1" }), true, "Valid projectId is configured");
+  assert.deepStrictEqual(
+    validateFirebaseAuthConfig({ projectId: "msc", apiKey: "key", authDomain: "msc.firebaseapp.com", appId: "1:web:abc" }).missingFields,
+    [],
+    "Complete Firebase web config enables Authentication"
+  );
+  assert.deepStrictEqual(
+    validateFirebaseAuthConfig({ projectId: "msc" }).missingFields,
+    ["apiKey", "authDomain", "appId"],
+    "Missing Authentication fields are reported"
+  );
+  assert.strictEqual(describeFirebaseAuthError({ code: "auth/unauthorized-domain" }).title, "Domain aplikasi belum diizinkan");
   console.log("✓ Firebase Config Validator: PASS");
 
   // Test Dynamic Config Storage
