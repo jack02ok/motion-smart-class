@@ -325,10 +325,12 @@ export class GestureEngine {
     }
 
     // Learn the standing position only from a neutral, clearly visible posture.
-    if (!isLeftHandUp && !isRightHandUp && isVisible(nose) && isVisible(leftHip) && isVisible(rightHip)) {
+    if (!isLeftHandUp && !isRightHandUp && isVisible(nose)) {
       const blend = this.calibrationSamples < 8 ? 1 / (this.calibrationSamples + 1) : 0.08;
       this.baselineNoseY = this.baselineNoseY === null ? nose.y : this.baselineNoseY + ((nose.y - this.baselineNoseY) * blend);
-      this.baselineHipY = this.baselineHipY === null ? hipY : this.baselineHipY + ((hipY - this.baselineHipY) * blend);
+      if (hipY !== null && isVisible(leftHip) && isVisible(rightHip)) {
+        this.baselineHipY = this.baselineHipY === null ? hipY : this.baselineHipY + ((hipY - this.baselineHipY) * blend);
+      }
       this.calibrationSamples += 1;
     }
 

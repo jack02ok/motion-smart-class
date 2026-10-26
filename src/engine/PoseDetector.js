@@ -30,7 +30,9 @@ export function smoothPoseLandmarks(previous, current) {
   });
 }
 
-const POSE_KEY_INDICES = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26];
+// Half-body mode: head, shoulders, elbows, and wrists are sufficient for calibration.
+// Hips and knees remain optional inputs that can improve squat detection when visible.
+const POSE_KEY_INDICES = [0, 11, 12, 13, 14, 15, 16];
 
 function landmarkVisibility(point) {
   return point && Number.isFinite(point.visibility) ? point.visibility : point ? 0.8 : 0;
@@ -43,6 +45,7 @@ export function getPoseDiagnostics(landmarks, previousLandmarks = null) {
     shoulders: visible(11) && visible(12),
     leftArm: visible(11) && visible(13) && visible(15),
     rightArm: visible(12) && visible(14) && visible(16),
+    upperBody: visible(11) && visible(12) && visible(13) && visible(14),
     hips: visible(23) && visible(24),
     legs: visible(25) && visible(26)
   };
@@ -447,6 +450,8 @@ export class PoseDetector {
     const rightShoulder = landmarks[12];
     const leftWrist = landmarks[15];
     const rightWrist = landmarks[16];
+    const leftElbow = landmarks[13];
+    const rightElbow = landmarks[14];
     const leftHip = landmarks[23];
     const rightHip = landmarks[24];
 
@@ -466,10 +471,10 @@ export class PoseDetector {
       (rightWrist.visibility === undefined || rightWrist.visibility > vThreshold)
     );
     const body = !!(
-      leftHip &&
-      rightHip &&
-      (leftHip.visibility === undefined || leftHip.visibility > vThreshold) &&
-      (rightHip.visibility === undefined || rightHip.visibility > vThreshold)
+      leftElbow &&
+      rightElbow &&
+      (leftElbow.visibility === undefined || leftElbow.visibility > vThreshold) &&
+      (rightElbow.visibility === undefined || rightElbow.visibility > vThreshold)
     );
 
     // Ideal position: nose should be vertically in upper half (0.15 - 0.45)
@@ -493,7 +498,7 @@ export class PoseDetector {
     if (!head) guidance = "Pastikan kepala terlihat dan tidak terpotong kamera.";
     else if (!shoulders) guidance = "Mundurkan badan hingga kedua bahu terlihat.";
     else if (!hands) guidance = "Tampilkan kedua tangan di dalam bingkai kamera.";
-    else if (!body) guidance = "Mundur sedikit agar tubuh hingga pinggul terlihat.";
+    else if (!body) guidance = "Pastikan dada dan kedua siku terlihat di dalam bingkai.";
     else if (!idealPosition) guidance = "Berdiri di tengah dan sesuaikan jarak dari kamera.";
     else if (diagnostics.quality < 65) guidance = "Tambah pencahayaan agar bentuk tubuh lebih jelas.";
     else if (diagnostics.stability > 0 && diagnostics.stability < 65) guidance = "Diam sejenak agar posisi dapat dikunci.";

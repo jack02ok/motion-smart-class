@@ -1,6 +1,15 @@
 import { cleanText, safeImageUrl } from "../utils/security.js";
 import { getCurrentUser } from "../firebase.js";
 
+let localIdSequence = 0;
+
+function createLocalId(prefix) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `${prefix}-${uuid}`;
+  localIdSequence += 1;
+  return `${prefix}-${Date.now()}-${localIdSequence}`;
+}
+
 /**
  * MOTION SMART CLASS - Storage Manager
  * Comprehensive LocalStorage management for Settings, Custom Questions, Team scores, Analytics & Badges.
@@ -185,7 +194,7 @@ export class StorageManager {
       const questions = this.getCustomQuestions();
       const newQuestion = {
         ...question,
-        id: question.id || "custom-" + Date.now(),
+        id: question.id || createLocalId("custom"),
         imageUrl: safeImageUrl(question.imageUrl),
         imageAlt: cleanText(question.imageAlt || question.question, 160),
         imageLayout: ["contain", "wide", "compact"].includes(question.imageLayout) ? question.imageLayout : "contain",
@@ -272,7 +281,7 @@ export class StorageManager {
         const validItem = {
           id: item.id && !String(item.id).startsWith("default-")
             ? cleanText(item.id, 80).replace(/[^a-zA-Z0-9_-]/g, "-")
-            : "custom-" + Date.now() + "-" + i,
+            : `${createLocalId("custom")}-${i}`,
           category: item.category === "literasi" ? "literasi" : "numerasi",
           topic: cleanText(item.topic || "Materi Umum", 100),
           grade: parseInt(item.grade, 10) >= 1 && parseInt(item.grade, 10) <= 6 ? parseInt(item.grade, 10) : 4,
