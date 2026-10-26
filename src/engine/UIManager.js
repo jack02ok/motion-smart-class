@@ -1445,7 +1445,14 @@ export class UIManager {
     // Process gestures
     const gestureResult = this.gesture.processLandmarks(landmarks);
 
-    this.updateLiveGestureBanner(gestureResult.gesture, gestureResult.confidence);
+    if (!landmarks || poseConfidence < 0.42) {
+      const bannerIcon = document.getElementById("gesture-banner-icon");
+      const bannerText = document.getElementById("gesture-banner-text");
+      if (bannerIcon) bannerIcon.textContent = "🧍";
+      if (bannerText) bannerText.textContent = "Pastikan tubuh terlihat dan ruangan cukup terang";
+    } else {
+      this.updateLiveGestureBanner(gestureResult.gesture, gestureResult.confidence);
+    }
     this.updateDebugStats({ fps, poseConfidence, landmarks, gesture: gestureResult });
 
     // Handle confirmed gesture
@@ -2069,6 +2076,7 @@ export class UIManager {
   // SCREEN 4: CAMERA CALIBRATION (CHECK)
   // ==========================================
   renderCalibrationScreen(container) {
+    this.gesture.resetCalibration();
     const isArena = this.game.selectedMode === GAME_MODES.ARENA;
     const isTeam = this.game.selectedMode === GAME_MODES.TEAM_BATTLE;
 

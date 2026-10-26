@@ -9,6 +9,27 @@
  * - Built-in fallback motion heuristics for offline resilience
  */
 
+export function smoothPoseLandmarks(previous, current) {
+  if (!Array.isArray(current)) return null;
+  if (!Array.isArray(previous) || previous.length !== current.length) {
+    return current.map((point) => point ? { ...point } : point);
+  }
+
+  return current.map((point, index) => {
+    const prior = previous[index];
+    if (!point || !prior) return point ? { ...point } : point;
+    const visibility = Number.isFinite(point.visibility) ? point.visibility : 0.8;
+    if (visibility < 0.35) return { ...point };
+    const alpha = index === 15 || index === 16 ? 0.72 : 0.55;
+    return {
+      ...point,
+      x: prior.x + ((point.x - prior.x) * alpha),
+      y: prior.y + ((point.y - prior.y) * alpha),
+      z: Number.isFinite(point.z) && Number.isFinite(prior.z) ? prior.z + ((point.z - prior.z) * alpha) : point.z
+    };
+  });
+}
+
 export class PoseDetector {
   constructor() {
     this.pose = null;
@@ -27,6 +48,7 @@ export class PoseDetector {
     this.minInferenceIntervalMs = 45; // ~22 inference FPS max, UI runs at 60 FPS
     this.lastInferenceTime = 0;
     this.isProcessingFrame = false;
+    this.loopToken = 0;
 
     // Latest landmarks
     this.latestLandmarks = null;
@@ -115,19 +137,23 @@ export class PoseDetector {
     this.frameCount = 0;
     this.fpsTimer = performance.now();
 
-    this.runLoop();
+    this.prevFrameData = null;
+    const loopToken = ++this.loopToken;
+    this.runLoop(loopToken);
   }
 
   stopDetection() {
     this.isDetecting = false;
+    this.loopToken += 1;
     this.latestLandmarks = null;
+    this.prevFrameData = null;
     if (this.canvasCtx && this.canvasElement) {
       this.canvasCtx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
     }
   }
 
-  runLoop() {
-    if (!this.isDetecting) return;
+  runLoop(loopToken) {
+    if (!this.isDetecting || loopToken !== this.loopToken) return;
 
     const now = performance.now();
     this.frameCount++;
@@ -157,12 +183,18 @@ export class PoseDetector {
         this.isProcessingFrame = true;
 
         if (this.pose) {
+          const inferenceStartedAt = performance.now();
           this.pose
             .send({ image: this.videoElement })
             .catch((err) => {
               console.warn("Pose send frame error:", err);
             })
             .finally(() => {
+              const inferenceDuration = performance.now() - inferenceStartedAt;
+              const targetInterval = inferenceDuration > 80 ? 80 : inferenceDuration > 55 ? 60 : 42;
+              this.minInferenceIntervalMs += (targetInterval - this.minInferenceIntervalMs) * 0.2;
+              // A restarted loop waits for the previous MediaPipe inference to finish,
+              // preventing two sends from racing on the same graph.
               this.isProcessingFrame = false;
             });
         } else {
@@ -174,13 +206,16 @@ export class PoseDetector {
     }
 
     // Always keep UI responsive
-    requestAnimationFrame(() => this.runLoop());
+    requestAnimationFrame(() => this.runLoop(loopToken));
   }
 
   handleResults(results) {
     if (!this.isDetecting) return;
 
-    const landmarks = results.poseLandmarks || null;
+    const rawLandmarks = Array.isArray(results.poseLandmarks) && results.poseLandmarks.length >= 25
+      ? results.poseLandmarks
+      : null;
+    const landmarks = rawLandmarks ? smoothPoseLandmarks(this.latestLandmarks, rawLandmarks) : null;
     this.latestLandmarks = landmarks;
 
     if (landmarks && landmarks.length > 0) {
@@ -343,7 +378,7 @@ export class PoseDetector {
         shoulderWidth <= 0.55;
     }
 
-    const allReady = head && shoulders && hands && idealPosition;
+    const allReady = head && shoulders && hands && body && idealPosition;
 
     return {
       head,

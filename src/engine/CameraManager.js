@@ -32,6 +32,10 @@ export function getCameraConstraintPlans(facingMode = "user") {
   ];
 }
 
+export function isUsableVideoTrack(track) {
+  return Boolean(track && track.readyState !== "ended" && track.enabled !== false);
+}
+
 export function describeCameraError(error, context = {}) {
   const name = error?.name || error?.code || "UnknownError";
   const isSecure = context.isSecureContext !== false;
@@ -182,6 +186,11 @@ export class CameraManager {
 
         this.stream = stream;
         const videoTrack = stream.getVideoTracks?.()[0];
+        if (!isUsableVideoTrack(videoTrack)) {
+          const noTrackError = new Error("Stream kamera tidak memiliki video track yang aktif.");
+          noTrackError.name = "NotReadableError";
+          throw noTrackError;
+        }
         if (videoTrack) {
           videoTrack.addEventListener?.("ended", () => {
             if (this.stream === stream) {
@@ -195,22 +204,15 @@ export class CameraManager {
           this.videoElement.srcObject = stream;
           this.videoElement.setAttribute("playsinline", "true");
           this.videoElement.muted = true;
-          if (this.videoElement.readyState < 1) {
-            await new Promise((resolve) => {
-              const timeout = setTimeout(resolve, 4000);
-              this.videoElement.addEventListener("loadedmetadata", () => {
-                clearTimeout(timeout);
-                resolve();
-              }, { once: true });
-            });
-          }
-          await this.videoElement.play().catch(() => {});
+          await this._waitForVideoReady(this.videoElement, videoTrack);
+          await this.videoElement.play();
         }
 
         this.notify(CAMERA_STATUS.READY);
         return { success: true, stream, mode: plans[index].name };
       } catch (error) {
         lastError = error;
+        this._releaseStream();
         const permissionError = ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(error?.name);
         const missingDevice = ["NotFoundError", "DevicesNotFoundError"].includes(error?.name);
         if (permissionError || missingDevice || index === plans.length - 1) break;
@@ -221,6 +223,43 @@ export class CameraManager {
     const details = describeCameraError(lastError, context);
     this.notify(CAMERA_STATUS.ERROR, details);
     return { success: false, error: details.message, details };
+  }
+
+  async _waitForVideoReady(videoElement, videoTrack) {
+    if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && isUsableVideoTrack(videoTrack)) return;
+
+    await new Promise((resolve, reject) => {
+      let timeout;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        videoElement.removeEventListener?.("loadeddata", onReady);
+        videoElement.removeEventListener?.("canplay", onReady);
+        videoElement.removeEventListener?.("error", onError);
+      };
+      const onReady = () => {
+        if (videoElement.videoWidth <= 0 || !isUsableVideoTrack(videoTrack)) return;
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        const error = new Error("Browser tidak dapat menampilkan stream kamera.");
+        error.name = "NotReadableError";
+        reject(error);
+      };
+
+      videoElement.addEventListener?.("loadeddata", onReady);
+      videoElement.addEventListener?.("canplay", onReady);
+      videoElement.addEventListener?.("error", onError);
+      timeout = setTimeout(() => {
+        if (videoElement.videoWidth > 0 && isUsableVideoTrack(videoTrack)) {
+          cleanup();
+          resolve();
+          return;
+        }
+        onError();
+      }, 5000);
+    });
   }
 
   _releaseStream() {
