@@ -54,6 +54,8 @@ export class GestureEngine {
     this.lastTriggeredTime = 0;
     this.isCoolingDown = false;
     this.movementProfile = "standard";
+    this.lastCandidateSeenAt = 0;
+    this.dropoutGraceMs = 180;
 
     // Upright baseline for squat detection
     this.baselineNoseY = null;
@@ -71,15 +73,21 @@ export class GestureEngine {
     this.movementProfile = profile === "hands_only" ? "hands_only" : "standard";
   }
 
+  resetCalibration() {
+    this.baselineNoseY = null;
+    this.baselineHipY = null;
+    this.calibrationSamples = 0;
+  }
+
   reset() {
     this.currentGesture = GESTURE_TYPES.NONE;
     this.gestureConfidence = 0;
     this.holdStartTime = null;
+    this.lastCandidateSeenAt = 0;
     if (this.onGestureProgress) this.onGestureProgress(0, GESTURE_TYPES.NONE);
   }
 
-  processLandmarks(landmarks) {
-    const now = performance.now();
+  processLandmarks(landmarks, now = performance.now()) {
 
     // Cooldown check
     if (now - this.lastTriggeredTime < this.cooldownMs) {
@@ -96,6 +104,19 @@ export class GestureEngine {
     this.isCoolingDown = false;
 
     if (!landmarks || landmarks.length < 25) {
+      if (this.currentGesture !== GESTURE_TYPES.NONE && now - this.lastCandidateSeenAt <= this.dropoutGraceMs) {
+        const progress = Math.min(1, (now - this.holdStartTime) / this.holdDurationMs);
+        if (this.onGestureProgress) this.onGestureProgress(progress, this.currentGesture);
+        return {
+          gesture: this.currentGesture,
+          label: GESTURE_LABELS[this.currentGesture],
+          confidence: this.gestureConfidence,
+          holdProgress: progress,
+          trackingUncertain: true,
+          confirmed: false,
+          isCoolingDown: false
+        };
+      }
       this.reset();
       return {
         gesture: GESTURE_TYPES.NONE,
@@ -111,11 +132,32 @@ export class GestureEngine {
 
     // Check gesture stability & hold progress
     if (gesture !== GESTURE_TYPES.NONE && confidence >= this.confidenceThreshold) {
+      if (
+        this.currentGesture !== GESTURE_TYPES.NONE &&
+        this.currentGesture !== gesture &&
+        now - this.lastCandidateSeenAt <= this.dropoutGraceMs
+      ) {
+        const progress = Math.min(1, (now - this.holdStartTime) / this.holdDurationMs);
+        if (this.onGestureProgress) this.onGestureProgress(progress, this.currentGesture);
+        return {
+          gesture: this.currentGesture,
+          label: GESTURE_LABELS[this.currentGesture],
+          confidence: this.gestureConfidence,
+          holdProgress: progress,
+          trackingUncertain: true,
+          confirmed: false,
+          isCoolingDown: false
+        };
+      }
       if (this.currentGesture !== gesture) {
         this.currentGesture = gesture;
         this.gestureConfidence = confidence;
         this.holdStartTime = now;
+      } else {
+        // Smooth confidence so a single weaker frame does not make the UI flicker.
+        this.gestureConfidence = (this.gestureConfidence * 0.65) + (confidence * 0.35);
       }
+      this.lastCandidateSeenAt = now;
 
       const elapsed = now - this.holdStartTime;
       const progress = Math.min(1.0, elapsed / this.holdDurationMs);
@@ -135,7 +177,7 @@ export class GestureEngine {
         return {
           gesture,
           label: GESTURE_LABELS[gesture] || gesture,
-          confidence,
+          confidence: this.gestureConfidence,
           confirmed: true,
           isCoolingDown: true
         };
@@ -144,12 +186,25 @@ export class GestureEngine {
       return {
         gesture,
         label: GESTURE_LABELS[gesture] || gesture,
-        confidence,
+        confidence: this.gestureConfidence,
         holdProgress: progress,
         confirmed: false,
         isCoolingDown: false
       };
     } else {
+      if (this.currentGesture !== GESTURE_TYPES.NONE && now - this.lastCandidateSeenAt <= this.dropoutGraceMs) {
+        const progress = Math.min(1, (now - this.holdStartTime) / this.holdDurationMs);
+        if (this.onGestureProgress) this.onGestureProgress(progress, this.currentGesture);
+        return {
+          gesture: this.currentGesture,
+          label: GESTURE_LABELS[this.currentGesture],
+          confidence: this.gestureConfidence,
+          holdProgress: progress,
+          trackingUncertain: true,
+          confirmed: false,
+          isCoolingDown: false
+        };
+      }
       this.reset();
       return {
         gesture: GESTURE_TYPES.NONE,
@@ -173,8 +228,15 @@ export class GestureEngine {
     const leftKnee = landmarks[25];
     const rightKnee = landmarks[26];
 
-    // Check basic presence
+    const visibility = (point) => point && Number.isFinite(point.visibility) ? point.visibility : 0.8;
+    const isVisible = (point, threshold = 0.45) => !!point && visibility(point) >= threshold;
+    const jointConfidence = (...points) => Math.min(...points.map(visibility));
+
+    // Shoulders anchor all arm gestures; reject unstable partial detections.
     if (!nose || !leftShoulder || !rightShoulder || !leftWrist || !rightWrist) {
+      return { gesture: GESTURE_TYPES.NONE, confidence: 0 };
+    }
+    if (!isVisible(leftShoulder) || !isVisible(rightShoulder)) {
       return { gesture: GESTURE_TYPES.NONE, confidence: 0 };
     }
 
@@ -184,8 +246,8 @@ export class GestureEngine {
     const shoulderHeight = Math.abs(leftShoulder.y - (leftHip ? leftHip.y : 0.65)) || 0.35;
     const elevationBuffer = shoulderHeight * 0.15; // Requires wrist to be clearly above shoulder
 
-    const isLeftHandUp = leftWrist.y < leftShoulder.y - elevationBuffer;
-    const isRightHandUp = rightWrist.y < rightShoulder.y - elevationBuffer;
+    const isLeftHandUp = isVisible(leftWrist) && leftWrist.y < leftShoulder.y - elevationBuffer;
+    const isRightHandUp = isVisible(rightWrist) && rightWrist.y < rightShoulder.y - elevationBuffer;
 
     // Both hands above head (BONUS gesture)
     const isBothHandsAboveHead =
@@ -194,22 +256,22 @@ export class GestureEngine {
       Math.abs(leftWrist.x - rightWrist.x) < 0.22;
 
     if (isBothHandsAboveHead) {
-      return { gesture: GESTURE_TYPES.BONUS, confidence: 0.9 };
+      return { gesture: GESTURE_TYPES.BONUS, confidence: jointConfidence(nose, leftShoulder, rightShoulder, leftWrist, rightWrist) };
     }
 
     // Both hands raised (GESTURE C)
     if (isLeftHandUp && isRightHandUp) {
-      return { gesture: GESTURE_TYPES.C, confidence: 0.88 };
+      return { gesture: GESTURE_TYPES.C, confidence: jointConfidence(leftShoulder, rightShoulder, leftWrist, rightWrist) };
     }
 
     // Only Left hand raised (GESTURE A)
     if (isLeftHandUp && !isRightHandUp) {
-      return { gesture: GESTURE_TYPES.A, confidence: 0.85 };
+      return { gesture: GESTURE_TYPES.A, confidence: jointConfidence(leftShoulder, leftWrist) };
     }
 
     // Only Right hand raised (GESTURE B)
     if (isRightHandUp && !isLeftHandUp) {
-      return { gesture: GESTURE_TYPES.B, confidence: 0.85 };
+      return { gesture: GESTURE_TYPES.B, confidence: jointConfidence(rightShoulder, rightWrist) };
     }
 
     // Arms stretched wide sideways (SKIP gesture)
@@ -217,15 +279,17 @@ export class GestureEngine {
     const shoulderSpan = Math.abs(leftShoulder.x - rightShoulder.x);
     const leftArmHorizontal = Math.abs(leftWrist.y - leftShoulder.y) < 0.12;
     const rightArmHorizontal = Math.abs(rightWrist.y - rightShoulder.y) < 0.12;
-    if (armSpan > shoulderSpan * 2.2 && leftArmHorizontal && rightArmHorizontal) {
-      return { gesture: GESTURE_TYPES.SKIP, confidence: 0.85 };
+    if (isVisible(leftWrist) && isVisible(rightWrist) && armSpan > shoulderSpan * 2.2 && leftArmHorizontal && rightArmHorizontal) {
+      return { gesture: GESTURE_TYPES.SKIP, confidence: jointConfidence(leftShoulder, rightShoulder, leftWrist, rightWrist) };
     }
 
     // Accessible alternative for option D: wrists crossed near opposite shoulders.
     if (this.movementProfile === "hands_only") {
       const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
       const crossedAtChest = distance(leftWrist, rightShoulder) < 0.24 && distance(rightWrist, leftShoulder) < 0.24;
-      if (crossedAtChest) return { gesture: GESTURE_TYPES.D, confidence: 0.86 };
+      if (crossedAtChest && isVisible(leftWrist) && isVisible(rightWrist)) {
+        return { gesture: GESTURE_TYPES.D, confidence: jointConfidence(leftShoulder, rightShoulder, leftWrist, rightWrist) };
+      }
     }
 
     // Squatting position (GESTURE D)
@@ -234,37 +298,49 @@ export class GestureEngine {
     let isSquatting = false;
     let squatConfidence = 0.75;
 
-    if (leftHip && rightHip && leftKnee && rightKnee) {
+    if ([leftHip, rightHip, leftKnee, rightKnee].every((point) => isVisible(point))) {
       const hipY = (leftHip.y + rightHip.y) / 2;
       const kneeY = (leftKnee.y + rightKnee.y) / 2;
       const hipKneeDist = Math.abs(kneeY - hipY);
       // In upright standing, hip-knee distance is ~0.25 - 0.35. When squatting, it compresses to < 0.16
       if (hipKneeDist < 0.16 && kneeY > hipY) {
         isSquatting = true;
-        squatConfidence = 0.86;
+        squatConfidence = jointConfidence(leftHip, rightHip, leftKnee, rightKnee);
       }
     }
 
-    // Adaptive fallback for camera framed tightly on upper body:
-    // If nose drops below 0.48 or hip drops significantly
-    if (!isSquatting && nose.y > 0.46) {
+    // For upper-body framing, compare against this student's standing baseline.
+    // An absolute canvas position causes false squats for tall/nearby students.
+    const hipY = leftHip && rightHip ? (leftHip.y + rightHip.y) / 2 : null;
+    const torsoHeight = hipY === null ? 0.25 : Math.max(0.15, Math.abs(hipY - shoulderAvgY));
+    const noseDrop = this.baselineNoseY === null ? 0 : nose.y - this.baselineNoseY;
+    const hipDrop = this.baselineHipY === null || hipY === null ? 0 : hipY - this.baselineHipY;
+    if (!isSquatting && (noseDrop > Math.max(0.08, torsoHeight * 0.32) || hipDrop > Math.max(0.06, torsoHeight * 0.25))) {
       isSquatting = true;
-      squatConfidence = 0.78;
+      squatConfidence = jointConfidence(nose, leftShoulder, rightShoulder, leftHip, rightHip);
     }
 
     if (isSquatting && this.movementProfile !== "hands_only") {
       return { gesture: GESTURE_TYPES.D, confidence: squatConfidence };
     }
 
+    // Learn the standing position only from a neutral, clearly visible posture.
+    if (!isLeftHandUp && !isRightHandUp && isVisible(nose) && isVisible(leftHip) && isVisible(rightHip)) {
+      const blend = this.calibrationSamples < 8 ? 1 / (this.calibrationSamples + 1) : 0.08;
+      this.baselineNoseY = this.baselineNoseY === null ? nose.y : this.baselineNoseY + ((nose.y - this.baselineNoseY) * blend);
+      this.baselineHipY = this.baselineHipY === null ? hipY : this.baselineHipY + ((hipY - this.baselineHipY) * blend);
+      this.calibrationSamples += 1;
+    }
+
     // Upright ready stance
     if (
       !isLeftHandUp &&
       !isRightHandUp &&
-      nose.y >= 0.15 &&
-      nose.y <= 0.40 &&
+      nose.y >= 0.08 &&
+      nose.y <= 0.55 &&
       Math.abs(leftShoulder.y - rightShoulder.y) < 0.08
     ) {
-      return { gesture: GESTURE_TYPES.READY, confidence: 0.8 };
+      return { gesture: GESTURE_TYPES.READY, confidence: jointConfidence(nose, leftShoulder, rightShoulder) };
     }
 
     return { gesture: GESTURE_TYPES.NONE, confidence: 0 };
@@ -296,21 +372,24 @@ export class GestureEngine {
     // Zone C: Bottom-Left (User's left lower quadrant) -> leftWrist.x > 0.55 && leftWrist.y >= 0.48
     // Zone D: Bottom-Right (User's right lower quadrant) -> rightWrist.x < 0.45 && rightWrist.y >= 0.48
 
-    const isLeftHandActive = leftWrist.visibility === undefined || leftWrist.visibility > 0.4;
-    const isRightHandActive = rightWrist.visibility === undefined || rightWrist.visibility > 0.4;
+    const isVisible = (point) => point.visibility === undefined || point.visibility > 0.45;
+    const isLeftHandActive = isVisible(leftWrist);
+    const isRightHandActive = isVisible(rightWrist);
+    const isLeftHandRaised = isLeftHandActive && leftWrist.y < leftShoulder.y - 0.05;
+    const isRightHandRaised = isRightHandActive && rightWrist.y < rightShoulder.y - 0.05;
 
     // Check elevated reach into Zone A (Left Upper)
-    if (isLeftHandActive && leftWrist.y < leftShoulder.y - 0.05 && !isRightHandActive) {
+    if (isLeftHandRaised && !isRightHandRaised) {
       return { zone: "A", gesture: GESTURE_TYPES.A, confidence: 0.88 };
     }
 
     // Check elevated reach into Zone B (Right Upper)
-    if (isRightHandActive && rightWrist.y < rightShoulder.y - 0.05 && !isLeftHandActive) {
+    if (isRightHandRaised && !isLeftHandRaised) {
       return { zone: "B", gesture: GESTURE_TYPES.B, confidence: 0.88 };
     }
 
     // Both hands up -> Zone C
-    if (isLeftHandActive && isRightHandActive && leftWrist.y < leftShoulder.y && rightWrist.y < rightShoulder.y) {
+    if (isLeftHandRaised && isRightHandRaised) {
       return { zone: "C", gesture: GESTURE_TYPES.C, confidence: 0.90 };
     }
 
@@ -321,10 +400,10 @@ export class GestureEngine {
     }
 
     // Spatial Reach mapping
-    if (leftWrist.y < 0.40) {
+    if (isLeftHandActive && leftWrist.y < 0.40) {
       return { zone: "A", gesture: GESTURE_TYPES.A, confidence: 0.85 };
     }
-    if (rightWrist.y < 0.40) {
+    if (isRightHandActive && rightWrist.y < 0.40) {
       return { zone: "B", gesture: GESTURE_TYPES.B, confidence: 0.85 };
     }
 

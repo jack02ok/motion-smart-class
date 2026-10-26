@@ -142,7 +142,7 @@ async function runTests() {
   assert.ok(!remaining.some((q) => q.id === q1.id), "Deleted question should not exist");
   console.log("✓ deleteCustomQuestion: PASS");
 
-  const { getCameraConstraintPlans, describeCameraError } = await import("../src/engine/CameraManager.js");
+  const { getCameraConstraintPlans, describeCameraError, isUsableVideoTrack } = await import("../src/engine/CameraManager.js");
   const cameraPlans = getCameraConstraintPlans("user");
   assert.strictEqual(cameraPlans.length, 2, "Camera must provide a PID-compatible fallback plan");
   assert.deepStrictEqual(cameraPlans[1].constraints, { audio: false, video: true });
@@ -150,6 +150,9 @@ async function runTests() {
   assert.strictEqual(describeCameraError({ name: "NotReadableError" }).title, "Kamera sedang dipakai atau diblokir");
   assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: false }).action, /overlay/i);
   assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: true }).action, /allow="camera"/i);
+  assert.strictEqual(isUsableVideoTrack({ readyState: "live", enabled: true }), true);
+  assert.strictEqual(isUsableVideoTrack({ readyState: "ended", enabled: true }), false);
+  assert.strictEqual(isUsableVideoTrack({ readyState: "live", enabled: false }), false);
   console.log("✓ PID camera fallback & diagnostics: PASS");
 
   const { escapeHTML, cleanText, safeColor, safeImageUrl } = await import("../src/utils/security.js");
@@ -297,17 +300,57 @@ async function runTests() {
   assert.strictEqual(resBoth.gesture, GESTURE_TYPES.C, "Gesture C is Both Hands Up");
   console.log("✓ Gesture C (Both Hands Raised): PASS");
 
-  // Test Squat
-  const landmarksSquat = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
-  landmarksSquat[0] = { x: 0.5, y: 0.52, visibility: 0.9 }; // nose dropped to > 0.46
-  landmarksSquat[11] = { x: 0.6, y: 0.60, visibility: 0.9 };
-  landmarksSquat[12] = { x: 0.4, y: 0.60, visibility: 0.9 };
-  landmarksSquat[15] = { x: 0.6, y: 0.70, visibility: 0.9 };
-  landmarksSquat[16] = { x: 0.4, y: 0.70, visibility: 0.9 };
+  const lowVisibilityHand = landmarksLeftUp.map((point) => ({ ...point }));
+  lowVisibilityHand[15].visibility = 0.2;
+  assert.notStrictEqual(
+    gestureEngine.classifyPose(lowVisibilityHand).gesture,
+    GESTURE_TYPES.A,
+    "A low-confidence wrist must not trigger an answer"
+  );
+  console.log("✓ low-confidence wrist rejection: PASS");
+
+  // Learn a student's neutral height, then detect a relative squat.
+  const upright = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+  upright[0] = { x: 0.5, y: 0.22, visibility: 0.9 };
+  upright[11] = { x: 0.6, y: 0.38, visibility: 0.9 };
+  upright[12] = { x: 0.4, y: 0.38, visibility: 0.9 };
+  upright[15] = { x: 0.64, y: 0.56, visibility: 0.9 };
+  upright[16] = { x: 0.36, y: 0.56, visibility: 0.9 };
+  upright[23] = { x: 0.57, y: 0.62, visibility: 0.9 };
+  upright[24] = { x: 0.43, y: 0.62, visibility: 0.9 };
+  upright[25] = { x: 0.57, y: 0.88, visibility: 0.9 };
+  upright[26] = { x: 0.43, y: 0.88, visibility: 0.9 };
+  gestureEngine.classifyPose(upright);
+
+  const landmarksSquat = upright.map((point) => ({ ...point }));
+  landmarksSquat[0].y = 0.36;
+  landmarksSquat[11].y = 0.50;
+  landmarksSquat[12].y = 0.50;
+  landmarksSquat[15].y = 0.67;
+  landmarksSquat[16].y = 0.67;
+  landmarksSquat[23].y = 0.74;
+  landmarksSquat[24].y = 0.74;
+  landmarksSquat[25].y = 0.86;
+  landmarksSquat[26].y = 0.86;
 
   const resSquat = gestureEngine.classifyPose(landmarksSquat);
   assert.strictEqual(resSquat.gesture, GESTURE_TYPES.D, "Gesture D is Squat");
-  console.log("✓ Gesture D (Squat Position): PASS");
+  console.log("✓ Gesture D (Adaptive Squat Position): PASS");
+
+  const dropoutEngine = new GestureEngine({ holdDurationMs: 450, cooldownMs: 0 });
+  assert.strictEqual(dropoutEngine.processLandmarks(landmarksLeftUp, 2000).gesture, GESTURE_TYPES.A);
+  const uncertainFrame = dropoutEngine.processLandmarks(null, 2140);
+  assert.strictEqual(uncertainFrame.gesture, GESTURE_TYPES.A, "One dropped frame must preserve the candidate gesture");
+  assert.strictEqual(uncertainFrame.trackingUncertain, true);
+  assert.strictEqual(dropoutEngine.processLandmarks(landmarksLeftUp, 2460).confirmed, true, "Brief landmark dropout must not cancel the hold");
+  const noisyFrameEngine = new GestureEngine({ holdDurationMs: 450, cooldownMs: 0 });
+  noisyFrameEngine.processLandmarks(landmarksLeftUp, 3000);
+  assert.strictEqual(
+    noisyFrameEngine.processLandmarks(lowVisibilityHand, 3120).trackingUncertain,
+    true,
+    "One low-confidence frame must not reset a valid hold"
+  );
+  console.log("✓ gesture hold tolerates brief landmark dropout: PASS");
 
   gestureEngine.setMovementProfile("hands_only");
   const crossedArms = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
@@ -331,7 +374,25 @@ async function runTests() {
   zoneALandmarks[16] = { x: 0.35, y: 0.65, visibility: 0.2 }; // Right wrist low/inactive
   const arenaResA = gestureEngine.classifyArenaZone(zoneALandmarks);
   assert.strictEqual(arenaResA.zone, "A", "Zone A should be classified");
+  zoneALandmarks[16].visibility = 0.9;
+  assert.strictEqual(
+    gestureEngine.classifyArenaZone(zoneALandmarks).zone,
+    "A",
+    "A visible but lowered opposite hand must not block Zone A"
+  );
   console.log("✓ classifyArenaZone (Zone A Reach): PASS");
+
+  const { PoseDetector, smoothPoseLandmarks } = await import("../src/engine/PoseDetector.js");
+  const previousPose = [{ x: 0.4, y: 0.4, z: 0, visibility: 0.9 }];
+  const jitteredPose = [{ x: 0.6, y: 0.6, z: 0, visibility: 0.9 }];
+  const smoothedPose = smoothPoseLandmarks(previousPose, jitteredPose);
+  assert.ok(smoothedPose[0].x > 0.4 && smoothedPose[0].x < 0.6, "Pose smoothing must reduce landmark jitter");
+  const calibrationPose = new PoseDetector();
+  const upperBodyOnly = landmarksLeftUp.map((point) => ({ ...point }));
+  upperBodyOnly[23].visibility = 0.1;
+  upperBodyOnly[24].visibility = 0.1;
+  assert.strictEqual(calibrationPose.checkCalibration(upperBodyOnly).allReady, false, "Calibration requires the body to be visible");
+  console.log("✓ landmark smoothing & full-body calibration: PASS");
 
   // Test Distance Estimation
   const idealPlayerLandmarks = Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
