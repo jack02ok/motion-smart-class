@@ -1432,8 +1432,8 @@ export class UIManager {
       this.pose.startDetection({
         videoElement: this.videoEl,
         canvasElement: this.canvasEl,
-        onResults: ({ landmarks, poseConfidence, fps, calibration, detectorMode }) => {
-          this.handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode });
+        onResults: ({ landmarks, poseConfidence, fps, calibration, detectorMode, detectorError }) => {
+          this.handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode, detectorError });
         }
       });
     } else {
@@ -1442,13 +1442,13 @@ export class UIManager {
     }
   }
 
-  handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode }) {
+  handlePoseResults({ landmarks, poseConfidence, fps, calibration, detectorMode, detectorError }) {
     const isArena = this.game.selectedMode === GAME_MODES.ARENA;
     const playerPos = this.gesture.estimatePlayerPosition(landmarks);
 
     // If in Calibration, update calibration checklist + Arena distance/lighting gauges
     if (this.game.state === GAME_STATES.CALIBRATION) {
-      this.updateCalibrationUI(calibration, playerPos, { poseConfidence, fps, detectorMode });
+      this.updateCalibrationUI(calibration, playerPos, { poseConfidence, fps, detectorMode, detectorError });
     }
 
     // Motion Arena Zone classification
@@ -1460,7 +1460,12 @@ export class UIManager {
     // Process gestures
     const gestureResult = this.gesture.processLandmarks(landmarks);
 
-    if (!landmarks || poseConfidence < 0.42) {
+    if (detectorError) {
+      const bannerIcon = document.getElementById("gesture-banner-icon");
+      const bannerText = document.getElementById("gesture-banner-text");
+      if (bannerIcon) bannerIcon.textContent = "⚠️";
+      if (bannerText) bannerText.textContent = detectorError.message;
+    } else if (!landmarks || poseConfidence < 0.42) {
       const bannerIcon = document.getElementById("gesture-banner-icon");
       const bannerText = document.getElementById("gesture-banner-text");
       if (bannerIcon) bannerIcon.textContent = "🧍";
@@ -2315,14 +2320,15 @@ export class UIManager {
 
     const quality = Number.isFinite(calibration.quality) ? calibration.quality : Math.round((telemetry.poseConfidence || 0) * 100);
     const stability = Number.isFinite(calibration.stability) ? calibration.stability : 0;
-    const state = calibration.stableReady ? "ready" : calibration.allReady ? "locking" : quality >= 45 ? "adjusting" : "searching";
+    const state = telemetry.detectorError ? "error" : calibration.stableReady ? "ready" : calibration.allReady ? "locking" : quality >= 45 ? "adjusting" : "searching";
     const statusLabels = {
       ready: "Tubuh terkunci dan siap",
       locking: `Mengunci posisi… ${calibration.readyProgress || 0}%`,
       adjusting: "Tubuh terdeteksi, sesuaikan posisi",
-      searching: "Mencari posisi siswa"
+      searching: "Mencari posisi siswa",
+      error: "Model gerakan belum aktif"
     };
-    const stateLabels = { ready: "TERKUNCI", locking: "MENSTABILKAN", adjusting: "SESUAIKAN", searching: "MENCARI" };
+    const stateLabels = { ready: "TERKUNCI", locking: "MENSTABILKAN", adjusting: "SESUAIKAN", searching: "MENCARI", error: "MODEL ERROR" };
 
     const qualityValue = document.getElementById("calib-quality-value");
     const qualityBar = document.getElementById("calib-quality-bar");
@@ -2336,11 +2342,19 @@ export class UIManager {
     if (qualityValue) qualityValue.textContent = `${quality}%`;
     if (qualityBar) qualityBar.style.width = `${quality}%`;
     if (status) status.textContent = statusLabels[state];
-    if (guidance) guidance.textContent = calibration.guidance || "Pastikan seluruh tubuh berada di area kamera.";
+    if (guidance) guidance.textContent = telemetry.detectorError?.message || calibration.guidance || "Pastikan seluruh tubuh berada di area kamera.";
     if (points) points.textContent = `${calibration.detectedPoints || 0}/${calibration.totalPoints || 11}`;
     if (stabilityEl) stabilityEl.textContent = `${stability}%`;
     if (fpsEl) fpsEl.textContent = `${telemetry.fps || 0} FPS`;
-    if (modelBadge) modelBadge.textContent = telemetry.detectorMode === "optical" ? "Mode kompatibel" : "AI Pose aktif";
+    if (modelBadge) {
+      modelBadge.textContent = telemetry.detectorMode === "error"
+        ? "AI Pose gagal"
+        : telemetry.detectorMode === "optical"
+          ? "Mode kompatibel"
+          : telemetry.detectorMode === "warming"
+            ? "Memuat AI Pose"
+            : "AI Pose aktif";
+    }
     if (liveCard) liveCard.className = `realtime-calibration-card state-${state}`;
 
     const hudState = document.getElementById("pose-hud-state");
@@ -2377,7 +2391,7 @@ export class UIManager {
     const startText = document.getElementById("calib-start-text");
 
     if (startBtn && startText) {
-      if (calibration.stableReady) {
+      if (calibration.stableReady && !telemetry.detectorError) {
         startBtn.classList.remove("disabled");
         startBtn.removeAttribute("disabled");
         startBtn.classList.add("ready-pulse");
