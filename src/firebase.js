@@ -5,27 +5,16 @@
  */
 
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, doc, getDoc, getDocs, limit, query, setDoc } from "firebase/firestore";
+import { getFirestore, collection, getDocs, limit, query } from "firebase/firestore";
 import {
-  browserLocalPersistence,
-  GoogleAuthProvider,
+  browserSessionPersistence,
   getAuth,
-  onAuthStateChanged,
   setPersistence,
   signInAnonymously,
-  signInWithPopup,
   signOut
 } from "firebase/auth";
 
 const STORAGE_CONFIG_KEY = "MSC_FIREBASE_CONFIG";
-export const USER_ROLES = Object.freeze({
-  STUDENT: "student",
-  TEACHER: "teacher",
-  SUPER_ADMIN: "super_admin",
-  OWNER: "owner"
-});
-
-const SELF_SERVICE_ROLES = new Set([USER_ROLES.STUDENT, USER_ROLES.TEACHER]);
 
 /**
  * Resolve active Firebase configuration from:
@@ -71,7 +60,7 @@ export function isFirebaseConfigured(config = getFirebaseConfig()) {
   return Boolean(config && config.projectId && config.projectId.trim().length > 0 && !config.projectId.includes("your-project-id"));
 }
 
-/** Authentication needs more configuration than a Firestore-only connection. */
+/** Anonymous database sessions need the complete Firebase Web App configuration. */
 export function validateFirebaseAuthConfig(config = getFirebaseConfig()) {
   const labels = {
     apiKey: "API Key",
@@ -88,82 +77,6 @@ export function validateFirebaseAuthConfig(config = getFirebaseConfig()) {
     valid: missingFields.length === 0,
     missingFields,
     missingLabels: missingFields.map((field) => labels[field])
-  };
-}
-
-/** Convert Firebase's technical auth codes into guidance suitable for end users. */
-export function describeFirebaseAuthError(error) {
-  const code = String(error?.code || "").replace(/^firebase:/i, "").trim();
-  const errors = {
-    "auth/configuration-not-ready": {
-      title: "Login Google belum siap",
-      message: error?.message || "Konfigurasi Firebase Authentication belum lengkap.",
-      action: "Lengkapi konfigurasi Web App Firebase, lalu muat ulang aplikasi."
-    },
-    "auth/unauthorized-domain": {
-      title: "Domain aplikasi belum diizinkan",
-      message: "Firebase menolak login dari alamat aplikasi ini.",
-      action: "Tambahkan domain aplikasi ke Authentication > Settings > Authorized domains."
-    },
-    "auth/operation-not-allowed": {
-      title: "Login Google belum diaktifkan",
-      message: "Provider Google belum aktif untuk proyek Firebase ini.",
-      action: "Aktifkan Google di Authentication > Sign-in method."
-    },
-    "auth/invalid-api-key": {
-      title: "API Key Firebase tidak valid",
-      message: "Aplikasi menggunakan API Key yang salah atau sudah tidak berlaku.",
-      action: "Salin ulang konfigurasi Web App dari Firebase Project Settings."
-    },
-    "auth/popup-blocked": {
-      title: "Popup login diblokir",
-      message: "Browser mencegah jendela Google Sign-In dibuka.",
-      action: "Izinkan popup untuk situs ini, kemudian coba lagi."
-    },
-    "auth/popup-closed-by-user": {
-      title: "Login dibatalkan",
-      message: "Jendela Google Sign-In ditutup sebelum proses selesai.",
-      action: "Tekan tombol login dan selesaikan pilihan akun Google."
-    },
-    "auth/cancelled-popup-request": {
-      title: "Permintaan login dibatalkan",
-      message: "Ada lebih dari satu permintaan login yang berjalan.",
-      action: "Tunggu sebentar, lalu coba kembali satu kali."
-    },
-    "auth/network-request-failed": {
-      title: "Koneksi login terputus",
-      message: "Browser tidak dapat menjangkau layanan Firebase Authentication.",
-      action: "Periksa koneksi internet, VPN, firewall, atau pemblokir iklan."
-    },
-    "auth/internal-error": {
-      title: "Firebase belum dapat memproses login",
-      message: "Biasanya ini terjadi karena konfigurasi Web App tidak lengkap atau pengaturan Google Sign-In belum selesai.",
-      action: "Periksa API Key, Auth Domain, App ID, provider Google, dan Authorized domains."
-    },
-    "auth/too-many-requests": {
-      title: "Terlalu banyak percobaan login",
-      message: "Firebase membatasi percobaan untuk sementara waktu.",
-      action: "Tunggu beberapa menit sebelum mencoba kembali."
-    },
-    "permission-denied": {
-      title: "Profil akun tidak dapat dibuat",
-      message: "Google Sign-In berhasil, tetapi Firestore menolak penyimpanan profil.",
-      action: "Pengelola perlu men-deploy firestore.rules terbaru untuk proyek ini."
-    },
-    "unavailable": {
-      title: "Layanan Firebase tidak tersedia",
-      message: "Profil belum dapat dibaca atau disimpan karena layanan sedang tidak terjangkau.",
-      action: "Periksa koneksi internet dan coba kembali beberapa saat lagi."
-    }
-  };
-
-  return {
-    code: code || "auth/unknown",
-    ...(errors[code] || {
-      title: "Login Google gagal",
-      message: "Proses login tidak dapat diselesaikan.",
-      action: "Coba kembali. Jika tetap gagal, hubungi pengelola aplikasi."
-    })
   };
 }
 
@@ -241,92 +154,16 @@ export function getAuthInstance() {
   return firebaseAuth;
 }
 
-export async function getUserProfile(user = getCurrentUser()) {
-  const db = getDb();
-  if (!user || !db || user.isAnonymous) return null;
-  const snapshot = await getDoc(doc(db, "users", user.uid));
-  return snapshot.exists() ? { uid: user.uid, ...snapshot.data() } : null;
-}
-
-export async function getAuthStatus() {
-  const user = getCurrentUser();
-  if (!user) return { signedIn: false, user: null, profile: null, role: null, isTeacher: false, isAdmin: false };
-  if (user.isAnonymous) return { signedIn: true, user, profile: null, role: "guest", isTeacher: false, isAdmin: false };
-  const profile = await getUserProfile(user).catch(() => null);
-  const role = profile?.role || USER_ROLES.STUDENT;
-  return {
-    signedIn: true,
-    user,
-    profile,
-    role,
-    isTeacher: [USER_ROLES.TEACHER, USER_ROLES.SUPER_ADMIN, USER_ROLES.OWNER].includes(role),
-    isAdmin: [USER_ROLES.SUPER_ADMIN, USER_ROLES.OWNER].includes(role)
-  };
-}
-
-/** Observe account changes and resolve the matching Firestore profile. */
-export function observeAuthState(callback) {
-  const auth = getAuthInstance();
-  if (!auth) return () => {};
-  return onAuthStateChanged(auth, async (user) => {
-    const status = await getAuthStatus().catch(() => ({ signedIn: Boolean(user), user, profile: null, role: null, isTeacher: false, isAdmin: false }));
-    callback(status);
-  });
-}
-
-/**
- * Sign in with Google. The selected role is only used when creating the first
- * profile. Existing roles (including elevated roles) can never be changed here.
- */
-export async function signInWithGoogle(selectedRole = USER_ROLES.STUDENT) {
-  if (!SELF_SERVICE_ROLES.has(selectedRole)) throw new Error("Pilihan peran tidak valid.");
-  const authConfig = validateFirebaseAuthConfig();
-  if (!authConfig.valid) {
-    const error = new Error(`Konfigurasi belum lengkap: ${authConfig.missingLabels.join(", ")}.`);
-    error.code = "auth/configuration-not-ready";
-    throw error;
-  }
-  const auth = getAuthInstance();
-  const db = getDb();
-  if (!auth || !db) throw new Error("Firebase belum dikonfigurasi.");
-
-  await setPersistence(auth, browserLocalPersistence);
-  const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
-  const credential = await signInWithPopup(auth, provider);
-  const profileRef = doc(db, "users", credential.user.uid);
-  const existing = await getDoc(profileRef);
-
-  if (!existing.exists()) {
-    const now = new Date().toISOString();
-    await setDoc(profileRef, {
-      uid: credential.user.uid,
-      role: selectedRole,
-      displayName: credential.user.displayName || "Pengguna Motion Smart Class",
-      email: credential.user.email || "",
-      photoURL: credential.user.photoURL || "",
-      createdAt: now,
-      updatedAt: now
-    });
-  }
-
-  return getAuthStatus();
-}
-
-/** Authenticate classroom devices anonymously and return their stable Firebase UID. */
+/** Authenticate classroom devices anonymously for the current browser session. */
 export async function ensureAnonymousAuth() {
   if (typeof window === "undefined" || !validateFirebaseAuthConfig().valid) return null;
   const auth = getAuthInstance();
   if (!auth) return null;
-  if (auth.currentUser) return auth.currentUser;
-  await setPersistence(auth, browserLocalPersistence);
+  await setPersistence(auth, browserSessionPersistence);
+  if (auth.currentUser?.isAnonymous) return auth.currentUser;
+  if (auth.currentUser) await signOut(auth);
   const credential = await signInAnonymously(auth);
   return credential.user;
-}
-
-export async function signOutFirebaseUser() {
-  const auth = getAuthInstance();
-  if (auth) await signOut(auth);
 }
 
 /**
@@ -345,7 +182,11 @@ export async function testFirestoreConnection(configToTest = null) {
     if (configToTest) {
       testApp = initializeApp(configToTest, "test-conn-" + Date.now());
       testDb = getFirestore(testApp);
+      const testAuth = getAuth(testApp);
+      await setPersistence(testAuth, browserSessionPersistence);
+      if (!testAuth.currentUser) await signInAnonymously(testAuth);
     } else {
+      await ensureAnonymousAuth();
       testDb = getDb();
     }
 

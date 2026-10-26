@@ -22,7 +22,7 @@ import {
   writeBatch,
   runTransaction
 } from "firebase/firestore";
-import { getDb, getCurrentUser, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
+import { ensureAnonymousAuth, getDb, getCurrentUser, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
 import { StorageManager } from "./StorageManager.js";
 import { cleanText, safeImageUrl } from "../utils/security.js";
 
@@ -167,11 +167,11 @@ export class FirestoreManager {
     return cleanQuestion;
   }
 
-  /** Submit a question to the moderation queue. Requires a non-anonymous account. */
-  static async submitQuestionForReview(question, profile) {
-    const user = getCurrentUser();
+  /** Submit a question to the moderation queue using the session's anonymous UID. */
+  static async submitQuestionForReview(question) {
+    const user = getCurrentUser() || await ensureAnonymousAuth();
     const db = getDb();
-    if (!user || user.isAnonymous) throw new Error("Masuk dengan Google sebelum mengirim soal.");
+    if (!user) throw new Error("Sesi database belum tersedia. Periksa konfigurasi Firebase Anonymous Authentication.");
     if (!db) throw new Error("Cloud Firestore belum tersedia.");
 
     const submissionRef = doc(collection(db, SUBMISSIONS_COLLECTION));
@@ -180,9 +180,9 @@ export class FirestoreManager {
     const payload = {
       id: submissionRef.id,
       ownerUid: user.uid,
-      ownerRole: ["student", "teacher"].includes(profile?.role) ? profile.role : "student",
-      ownerName: cleanText(profile?.displayName || user.displayName || "Pengguna", 100),
-      ownerEmail: cleanText(profile?.email || user.email || "", 160),
+      ownerRole: "student",
+      ownerName: "Peserta Anonim",
+      ownerEmail: "",
       status: "pending",
       question: cleanQuestion,
       submittedAt: now,
@@ -198,7 +198,7 @@ export class FirestoreManager {
   static async fetchQuestionSubmissions({ mine = false, status = "all", limitCount = 100 } = {}) {
     const user = getCurrentUser();
     const db = getDb();
-    if (!user || user.isAnonymous || !db) return [];
+    if (!user || !db) return [];
     const constraints = [];
     if (mine) constraints.push(where("ownerUid", "==", user.uid));
     constraints.push(limit(limitCount));
@@ -353,8 +353,8 @@ export class FirestoreManager {
   // ==========================================
 
   /**
-   * Record a completed game session. Guests only use session-scoped storage;
-   * Google accounts may synchronize to Firestore.
+   * Record a completed game session. Local history remains session-scoped,
+   * while privacy-safe aggregate results may synchronize to Firestore.
    * Ensures strict student privacy (numerical metrics only, zero camera/biometric data).
    */
   static async recordGameSession(sessionData, { saveLocal = true } = {}) {
@@ -385,7 +385,7 @@ export class FirestoreManager {
         : [],
       source: "app"
     };
-    const currentUser = getCurrentUser();
+    const currentUser = getCurrentUser() || await ensureAnonymousAuth().catch(() => null);
     cleanSession.ownerUid = currentUser?.uid || null;
 
     // PRIVACY ENFORCEMENT: Explicitly delete any accidental raw camera or landmark fields
@@ -408,7 +408,7 @@ export class FirestoreManager {
 
     // Save to Firestore asynchronously
     const status = this.getStatus();
-    if (status.isConfigured && currentUser && !currentUser.isAnonymous) {
+    if (status.isConfigured && currentUser) {
       try {
         const db = getDb();
         if (db) {
@@ -459,11 +459,11 @@ export class FirestoreManager {
     }
   }
 
-  /** Fetch only the signed-in user's play history (works for student accounts). */
+  /** Fetch game history owned by this browser session's anonymous UID. */
   static async fetchMyGameSessions(limitCount = 20) {
     const user = getCurrentUser();
     const status = this.getStatus();
-    if (!user || user.isAnonymous || !status.isConfigured) return StorageManager.getAnalyticsHistory().slice(0, limitCount);
+    if (!user || !status.isConfigured) return StorageManager.getAnalyticsHistory().slice(0, limitCount);
     try {
       const db = getDb();
       const snapshot = await getDocs(query(

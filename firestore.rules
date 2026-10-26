@@ -68,7 +68,6 @@ service cloud.firestore {
 
     match /question_submissions/{submissionId} {
       allow create: if signedIn()
-        && !request.auth.token.firebase.sign_in_provider.matches('anonymous')
         && request.resource.data.id == submissionId
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.ownerRole in ['student', 'teacher']
@@ -111,7 +110,7 @@ service cloud.firestore {
 
     match /msc_rooms/{roomCode} {
       allow read: if signedIn();
-      allow create: if isTeacher()
+      allow create: if signedIn()
         && request.resource.data.hostUid == request.auth.uid
         && request.resource.data.roomCode == roomCode
         && request.resource.data.keys().hasOnly([
@@ -119,8 +118,14 @@ service cloud.firestore {
           'settings', 'questions', 'currentQuestionIndex', 'questionStartedAt',
           'countdownSec', 'players', 'leaderboard'
         ]);
-      allow update: if isTeacher() || isOwnPlayerUpdate();
-      allow delete: if isTeacher();
+      allow update: if isRoomHostUpdate() || isOwnPlayerUpdate();
+      allow delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+
+      function isRoomHostUpdate() {
+        return signedIn()
+          && resource.data.hostUid == request.auth.uid
+          && request.resource.data.hostUid == resource.data.hostUid;
+      }
 
       function isOwnPlayerUpdate() {
         let uid = request.auth.uid;
@@ -156,9 +161,15 @@ service cloud.firestore {
       }
     }
 
-    // Correct answers and explanations are only available to authenticated teachers.
+    // Correct answers and explanations are scoped to the anonymous host session.
     match /msc_room_secrets/{roomCode} {
-      allow read, create, update, delete: if isTeacher();
+      allow create: if signedIn()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['hostUid', 'questions', 'createdAt']);
+      allow read, delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.hostUid == request.auth.uid
+        && request.resource.data.hostUid == resource.data.hostUid;
     }
   }
 }

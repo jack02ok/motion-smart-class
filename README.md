@@ -38,10 +38,9 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
 
 ### 5. Mode Guru (Teacher Mode)
-- Login menyediakan pilihan peran **Siswa** atau **Guru** dan menggunakan Google Sign-In. Pilihan peran hanya dipakai ketika profil pertama dibuat.
-- Riwayat bermain disimpan berdasarkan UID Firebase sehingga tetap tersedia saat pengguna masuk kembali.
-- Pengguna tetap dapat bermain sebagai tamu anonim. Statistik, progres, dan riwayat tamu hanya disimpan di `sessionStorage` selama sesi tab aktif dan tidak dikirim ke koleksi riwayat Firestore.
-- Siswa dan guru dapat mengirim soal ke antrean review. Hanya profil `super_admin` atau `owner` yang dapat menyetujui dan menerbitkannya.
+- Aplikasi tidak menampilkan login. Firebase Anonymous Authentication membuat identitas teknis per sesi agar database tetap aman dan dapat digunakan.
+- Statistik, progres, dan riwayat lokal disimpan di `sessionStorage` selama sesi tab aktif. Ringkasan hasil tanpa video/biometrik dapat dicatat ke Firestore dengan UID anonim.
+- Pengguna dapat mengirim soal ke antrean review Firestore. Publikasi dan moderasi dilakukan oleh pengelola melalui Firebase Console atau Admin SDK.
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
@@ -87,7 +86,7 @@ motion-smart-class/
 │       ├── GestureEngine.js    # Klasifikasi postur tubuh, debouncing & hold meter
 │       ├── GameEngine.js       # State machine permainan & countdown
 │       ├── MultiplayerEngine.js# Cloud Firestore & BroadcastChannel Realtime Rooms
-│       └── UIManager.js        # Antarmuka layar, login Google, Studio, podium & konfeti
+│       └── UIManager.js        # Antarmuka layar, Studio, podium & konfeti
 ```
 
 ### 8. Multiplayer Online Real-Time (Game Show Kelas) 🌐
@@ -131,21 +130,20 @@ npm run check
 
 ## 🔐 Konfigurasi Firebase yang aman
 
-1. Aktifkan provider **Google** dan **Anonymous** di Firebase Authentication.
-2. Tambahkan domain produksi ke daftar **Authorized domains** Firebase Authentication.
+1. Aktifkan provider **Anonymous** di Firebase Authentication. Provider Google tidak diperlukan.
+2. Pastikan domain produksi tersedia di konfigurasi proyek Firebase.
 3. Isi seluruh konfigurasi Web App pada environment deployment: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, dan `VITE_FIREBASE_APP_ID`. `.env.example` hanya contoh dan tidak otomatis dipakai saat build.
 4. Deploy `firestore.rules` dari repository ini.
-5. Login sekali dengan akun pemilik, lalu ubah field `role` pada `users/{uid}` menjadi `owner` atau `super_admin` melalui Firebase Console/Admin SDK. Client hanya dapat membuat role awal `student` atau `teacher` dan tidak dapat menaikkan hak akses sendiri.
+5. Lakukan publikasi, moderasi, dan penghapusan soal dari Firebase Console atau backend Admin SDK tepercaya.
 6. Aktifkan Firebase App Check untuk deployment produksi.
 
 Koleksi utama:
 
-- `users`: profil dan role akun.
-- `game_sessions`: riwayat bermain milik UID pengguna.
+- `game_sessions`: ringkasan sesi milik UID anonim saat itu.
 - `question_submissions`: antrean kontribusi dengan status `pending`, `approved`, atau `rejected`.
 - `questions`: hanya berisi soal yang sudah diterbitkan admin.
 
-Perangkat yang belum login Google tetap memakai Firebase Anonymous untuk bermain/multiplayer. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban; kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca guru/admin.
+Semua perangkat memakai Firebase Anonymous untuk akses database dan multiplayer tanpa layar login. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban; kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca oleh UID anonim milik host room.
 
 > Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. Deploy rules terbaru sebelum mengaktifkan kontribusi soal.
 
