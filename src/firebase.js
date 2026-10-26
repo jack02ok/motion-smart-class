@@ -33,21 +33,6 @@ const SELF_SERVICE_ROLES = new Set([USER_ROLES.STUDENT, USER_ROLES.TEACHER]);
  * 2. Vite environment variables (import.meta.env.VITE_FIREBASE_*)
  */
 export function getFirebaseConfig() {
-  try {
-    if (typeof localStorage !== "undefined") {
-      const stored = localStorage.getItem(STORAGE_CONFIG_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.projectId) {
-          return { ...parsed, source: "localStorage" };
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("[Firebase] Error reading stored config:", e);
-  }
-
-  // Fallback to Vite environment variables
   const env = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
   const envConfig = {
     apiKey: env.VITE_FIREBASE_API_KEY || "",
@@ -59,6 +44,23 @@ export function getFirebaseConfig() {
     source: "env"
   };
 
+  try {
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem(STORAGE_CONFIG_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.projectId) {
+          const populatedFields = Object.fromEntries(
+            Object.entries(parsed).filter(([, value]) => typeof value === "string" && value.trim())
+          );
+          return { ...envConfig, ...populatedFields, source: "localStorage" };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Firebase] Error reading stored config:", e);
+  }
+
   return envConfig;
 }
 
@@ -67,6 +69,102 @@ export function getFirebaseConfig() {
  */
 export function isFirebaseConfigured(config = getFirebaseConfig()) {
   return Boolean(config && config.projectId && config.projectId.trim().length > 0 && !config.projectId.includes("your-project-id"));
+}
+
+/** Authentication needs more configuration than a Firestore-only connection. */
+export function validateFirebaseAuthConfig(config = getFirebaseConfig()) {
+  const labels = {
+    apiKey: "API Key",
+    authDomain: "Auth Domain",
+    projectId: "Project ID",
+    appId: "App ID"
+  };
+  const missingFields = Object.keys(labels).filter((field) => {
+    const value = config?.[field];
+    return typeof value !== "string" || !value.trim() || value.includes("...");
+  });
+
+  return {
+    valid: missingFields.length === 0,
+    missingFields,
+    missingLabels: missingFields.map((field) => labels[field])
+  };
+}
+
+/** Convert Firebase's technical auth codes into guidance suitable for end users. */
+export function describeFirebaseAuthError(error) {
+  const code = String(error?.code || "").replace(/^firebase:/i, "").trim();
+  const errors = {
+    "auth/configuration-not-ready": {
+      title: "Login Google belum siap",
+      message: error?.message || "Konfigurasi Firebase Authentication belum lengkap.",
+      action: "Lengkapi konfigurasi Web App Firebase, lalu muat ulang aplikasi."
+    },
+    "auth/unauthorized-domain": {
+      title: "Domain aplikasi belum diizinkan",
+      message: "Firebase menolak login dari alamat aplikasi ini.",
+      action: "Tambahkan domain aplikasi ke Authentication > Settings > Authorized domains."
+    },
+    "auth/operation-not-allowed": {
+      title: "Login Google belum diaktifkan",
+      message: "Provider Google belum aktif untuk proyek Firebase ini.",
+      action: "Aktifkan Google di Authentication > Sign-in method."
+    },
+    "auth/invalid-api-key": {
+      title: "API Key Firebase tidak valid",
+      message: "Aplikasi menggunakan API Key yang salah atau sudah tidak berlaku.",
+      action: "Salin ulang konfigurasi Web App dari Firebase Project Settings."
+    },
+    "auth/popup-blocked": {
+      title: "Popup login diblokir",
+      message: "Browser mencegah jendela Google Sign-In dibuka.",
+      action: "Izinkan popup untuk situs ini, kemudian coba lagi."
+    },
+    "auth/popup-closed-by-user": {
+      title: "Login dibatalkan",
+      message: "Jendela Google Sign-In ditutup sebelum proses selesai.",
+      action: "Tekan tombol login dan selesaikan pilihan akun Google."
+    },
+    "auth/cancelled-popup-request": {
+      title: "Permintaan login dibatalkan",
+      message: "Ada lebih dari satu permintaan login yang berjalan.",
+      action: "Tunggu sebentar, lalu coba kembali satu kali."
+    },
+    "auth/network-request-failed": {
+      title: "Koneksi login terputus",
+      message: "Browser tidak dapat menjangkau layanan Firebase Authentication.",
+      action: "Periksa koneksi internet, VPN, firewall, atau pemblokir iklan."
+    },
+    "auth/internal-error": {
+      title: "Firebase belum dapat memproses login",
+      message: "Biasanya ini terjadi karena konfigurasi Web App tidak lengkap atau pengaturan Google Sign-In belum selesai.",
+      action: "Periksa API Key, Auth Domain, App ID, provider Google, dan Authorized domains."
+    },
+    "auth/too-many-requests": {
+      title: "Terlalu banyak percobaan login",
+      message: "Firebase membatasi percobaan untuk sementara waktu.",
+      action: "Tunggu beberapa menit sebelum mencoba kembali."
+    },
+    "permission-denied": {
+      title: "Profil akun tidak dapat dibuat",
+      message: "Google Sign-In berhasil, tetapi Firestore menolak penyimpanan profil.",
+      action: "Pengelola perlu men-deploy firestore.rules terbaru untuk proyek ini."
+    },
+    "unavailable": {
+      title: "Layanan Firebase tidak tersedia",
+      message: "Profil belum dapat dibaca atau disimpan karena layanan sedang tidak terjangkau.",
+      action: "Periksa koneksi internet dan coba kembali beberapa saat lagi."
+    }
+  };
+
+  return {
+    code: code || "auth/unknown",
+    ...(errors[code] || {
+      title: "Login Google gagal",
+      message: "Proses login tidak dapat diselesaikan.",
+      action: "Coba kembali. Jika tetap gagal, hubungi pengelola aplikasi."
+    })
+  };
 }
 
 let firebaseApp = null;
@@ -182,6 +280,12 @@ export function observeAuthState(callback) {
  */
 export async function signInWithGoogle(selectedRole = USER_ROLES.STUDENT) {
   if (!SELF_SERVICE_ROLES.has(selectedRole)) throw new Error("Pilihan peran tidak valid.");
+  const authConfig = validateFirebaseAuthConfig();
+  if (!authConfig.valid) {
+    const error = new Error(`Konfigurasi belum lengkap: ${authConfig.missingLabels.join(", ")}.`);
+    error.code = "auth/configuration-not-ready";
+    throw error;
+  }
   const auth = getAuthInstance();
   const db = getDb();
   if (!auth || !db) throw new Error("Firebase belum dikonfigurasi.");
@@ -211,7 +315,7 @@ export async function signInWithGoogle(selectedRole = USER_ROLES.STUDENT) {
 
 /** Authenticate classroom devices anonymously and return their stable Firebase UID. */
 export async function ensureAnonymousAuth() {
-  if (typeof window === "undefined" || !isFirebaseConfigured()) return null;
+  if (typeof window === "undefined" || !validateFirebaseAuthConfig().valid) return null;
   const auth = getAuthInstance();
   if (!auth) return null;
   if (auth.currentUser) return auth.currentUser;

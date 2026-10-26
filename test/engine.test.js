@@ -142,6 +142,16 @@ async function runTests() {
   assert.ok(!remaining.some((q) => q.id === q1.id), "Deleted question should not exist");
   console.log("✓ deleteCustomQuestion: PASS");
 
+  const { getCameraConstraintPlans, describeCameraError } = await import("../src/engine/CameraManager.js");
+  const cameraPlans = getCameraConstraintPlans("user");
+  assert.strictEqual(cameraPlans.length, 2, "Camera must provide a PID-compatible fallback plan");
+  assert.deepStrictEqual(cameraPlans[1].constraints, { audio: false, video: true });
+  assert.strictEqual(cameraPlans[0].constraints.video.frameRate.max, undefined, "Preferred camera FPS must not impose a hard maximum");
+  assert.strictEqual(describeCameraError({ name: "NotReadableError" }).title, "Kamera sedang dipakai atau diblokir");
+  assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: false }).action, /overlay/i);
+  assert.match(describeCameraError({ name: "NotAllowedError" }, { isEmbedded: true }).action, /allow="camera"/i);
+  console.log("✓ PID camera fallback & diagnostics: PASS");
+
   const { escapeHTML, cleanText, safeColor, safeImageUrl } = await import("../src/utils/security.js");
   assert.strictEqual(escapeHTML('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
   assert.strictEqual(cleanText("Nama\u0000 Siswa", 20), "Nama Siswa");
@@ -424,12 +434,23 @@ async function runTests() {
   assert.strictEqual(sanitizedQuestion.grade, 6);
   assert.strictEqual(sanitizedQuestion.imageUrl, "");
   console.log("✓ Moderated question sanitization: PASS");
-  const { isFirebaseConfigured, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
+  const { isFirebaseConfigured, validateFirebaseAuthConfig, describeFirebaseAuthError, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator
   assert.strictEqual(isFirebaseConfigured({ projectId: "" }), false, "Empty projectId is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "your-project-id" }), false, "Placeholder is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "msc-sd-negeri-1" }), true, "Valid projectId is configured");
+  assert.deepStrictEqual(
+    validateFirebaseAuthConfig({ projectId: "msc", apiKey: "key", authDomain: "msc.firebaseapp.com", appId: "1:web:abc" }).missingFields,
+    [],
+    "Complete Firebase web config enables Authentication"
+  );
+  assert.deepStrictEqual(
+    validateFirebaseAuthConfig({ projectId: "msc" }).missingFields,
+    ["apiKey", "authDomain", "appId"],
+    "Missing Authentication fields are reported"
+  );
+  assert.strictEqual(describeFirebaseAuthError({ code: "auth/unauthorized-domain" }).title, "Domain aplikasi belum diizinkan");
   console.log("✓ Firebase Config Validator: PASS");
 
   // Test Dynamic Config Storage
