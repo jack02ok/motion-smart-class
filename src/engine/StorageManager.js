@@ -1,5 +1,4 @@
 import { cleanText, safeImageUrl } from "../utils/security.js";
-import { getCurrentUser } from "../firebase.js";
 
 let localIdSequence = 0;
 
@@ -56,20 +55,16 @@ const DEFAULT_TEAMS = [
 
 export class StorageManager {
   /**
-   * Learning data is temporary for guests and scoped per UID for Google users.
+   * Learning data is temporary and scoped to the current browser session.
    * sessionStorage is automatically cleared when the browser tab/session ends.
    */
   static _getLearningStore() {
-    const user = getCurrentUser();
-    const persistent = Boolean(user && !user.isAnonymous);
-    if (!persistent && !legacyLearningDataCleared && typeof localStorage !== "undefined") {
+    if (!legacyLearningDataCleared && typeof localStorage !== "undefined") {
       [STATS_KEY, ANALYTICS_KEY, ADVENTURE_KEY].forEach((key) => localStorage.removeItem(key));
       legacyLearningDataCleared = true;
     }
-    const storage = persistent
-      ? (typeof localStorage !== "undefined" ? localStorage : null)
-      : (typeof sessionStorage !== "undefined" ? sessionStorage : null);
-    return { storage, suffix: persistent ? `_${user.uid}` : "_GUEST" };
+    const storage = typeof sessionStorage !== "undefined" ? sessionStorage : null;
+    return { storage, suffix: "_GUEST" };
   }
 
   static _learningKey(baseKey) {

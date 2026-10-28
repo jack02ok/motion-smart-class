@@ -172,11 +172,11 @@ async function runTests() {
   const firestoreRules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
   assert.ok(!firestoreRules.includes("allow read: if true"), "Firestore must not expose public reads");
   assert.ok(!firestoreRules.includes("allow write: if true"), "Firestore must not expose public writes");
-  assert.ok(firestoreRules.includes("msc_room_secrets"), "Answer keys need a teacher-only collection");
+  assert.ok(firestoreRules.includes("msc_room_secrets"), "Answer keys need a host-only collection");
   assert.ok(firestoreRules.includes("isOwnPlayerUpdate"), "Player updates must be scoped to their Firebase UID");
+  assert.ok(firestoreRules.includes("resource.data.hostUid == request.auth.uid"), "Anonymous room hosts must retain ownership controls");
   assert.ok(firestoreRules.includes("question_submissions"), "Question contributions need a moderated collection");
   assert.ok(firestoreRules.includes("isAdmin() && validQuestion()"), "Only an admin may publish questions");
-  assert.ok(firestoreRules.includes("request.resource.data.role in ['student', 'teacher']"), "Self-service login roles must not include admin roles");
   assert.ok(firestoreRules.includes("request.resource.data.status in ['approved', 'rejected']"), "Moderation decisions must be constrained");
   console.log("✓ Firestore security invariants: PASS");
 
@@ -541,7 +541,7 @@ async function runTests() {
   assert.strictEqual(sanitizedQuestion.grade, 6);
   assert.strictEqual(sanitizedQuestion.imageUrl, "");
   console.log("✓ Moderated question sanitization: PASS");
-  const { isFirebaseConfigured, validateFirebaseAuthConfig, describeFirebaseAuthError, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
+  const { isFirebaseConfigured, validateFirebaseAuthConfig, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator
   assert.strictEqual(isFirebaseConfigured({ projectId: "" }), false, "Empty projectId is not configured");
@@ -550,14 +550,13 @@ async function runTests() {
   assert.deepStrictEqual(
     validateFirebaseAuthConfig({ projectId: "msc", apiKey: "key", authDomain: "msc.firebaseapp.com", appId: "1:web:abc" }).missingFields,
     [],
-    "Complete Firebase web config enables Authentication"
+    "Complete Firebase web config enables the anonymous database session"
   );
   assert.deepStrictEqual(
     validateFirebaseAuthConfig({ projectId: "msc" }).missingFields,
     ["apiKey", "authDomain", "appId"],
-    "Missing Authentication fields are reported"
+    "Missing Firebase client fields are reported"
   );
-  assert.strictEqual(describeFirebaseAuthError({ code: "auth/unauthorized-domain" }).title, "Domain aplikasi belum diizinkan");
   console.log("✓ Firebase Config Validator: PASS");
 
   // Test Dynamic Config Storage
