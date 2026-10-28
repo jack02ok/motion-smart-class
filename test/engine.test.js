@@ -169,6 +169,11 @@ async function runTests() {
 
   const appHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(appHtml, /script-src[^;]*'wasm-unsafe-eval'/, "CSP must permit MediaPipe WebAssembly compilation");
+  const adminHtml = readFileSync(new URL("../admin.html", import.meta.url), "utf8");
+  assert.match(adminHtml, /data-page="admin"/, "Administrator must have a dedicated page entry");
+  assert.match(adminHtml, /noindex, nofollow/, "Administrator page must not be indexed by search engines");
+  const uiManagerSource = readFileSync(new URL("../src/engine/UIManager.js", import.meta.url), "utf8");
+  assert.match(uiManagerSource, /window\.location\.assign\("\/admin\.html"\)/, "Public Studio must navigate to the dedicated administrator page");
   console.log("✓ MediaPipe WebAssembly CSP permission: PASS");
 
   const firestoreRules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
