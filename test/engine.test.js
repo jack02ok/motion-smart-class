@@ -174,6 +174,7 @@ async function runTests() {
   assert.match(adminHtml, /noindex, nofollow/, "Administrator page must not be indexed by search engines");
   const uiManagerSource = readFileSync(new URL("../src/engine/UIManager.js", import.meta.url), "utf8");
   assert.match(uiManagerSource, /window\.location\.assign\("\/admin\.html"\)/, "Public Studio must navigate to the dedicated administrator page");
+  assert.match(uiManagerSource, /if \(this\.isStandaloneAdmin\) this\.closeTeacherModal\(\)/, "Admin login cancellation must return to the application instead of leaving a blank page");
   console.log("✓ MediaPipe WebAssembly CSP permission: PASS");
 
   const firestoreRules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");

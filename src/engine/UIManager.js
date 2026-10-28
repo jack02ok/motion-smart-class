@@ -755,7 +755,10 @@ export class UIManager {
       if (this.isStandaloneAdmin) this.showAdminLoginForm();
       else window.location.assign("/admin.html");
     });
-    document.getElementById("btn-admin-login-cancel").addEventListener("click", () => this.hideAdminLoginForm());
+    document.getElementById("btn-admin-login-cancel").addEventListener("click", () => {
+      if (this.isStandaloneAdmin) this.closeTeacherModal();
+      else this.hideAdminLoginForm();
+    });
     document.getElementById("admin-login-form").addEventListener("submit", (event) => this.handleAdminLogin(event));
     document.getElementById("btn-admin-logout").addEventListener("click", () => this.handleAdminLogout());
 
@@ -3147,6 +3150,8 @@ export class UIManager {
     document.getElementById("teacher-modal-title").textContent = title;
     document.getElementById("teacher-modal-eyebrow").textContent = eyebrow;
     document.getElementById("teacher-modal-subtitle").textContent = subtitle;
+    document.getElementById("btn-admin-login-cancel").textContent = this.isStandaloneAdmin ? "Kembali" : "Batal";
+    document.getElementById("btn-teacher-close").setAttribute("aria-label", this.isStandaloneAdmin ? "Kembali ke aplikasi" : "Tutup Studio");
     const modal = document.getElementById("teacher-modal");
     modal?.classList.toggle("admin-authenticated", isAdmin);
     modal?.classList.toggle("standalone-admin", this.isStandaloneAdmin);
