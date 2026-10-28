@@ -43,6 +43,7 @@ const QUESTION_MODE_LABELS = Object.freeze({
 export class UIManager {
   constructor({ appContainer, gameEngine, cameraManager, poseDetector, gestureEngine, audioManager }) {
     this.container = appContainer;
+    this.isStandaloneAdmin = document.body.dataset.page === "admin";
     this.game = gameEngine;
     this.camera = cameraManager;
     this.pose = poseDetector;
@@ -67,6 +68,7 @@ export class UIManager {
     this.configureStudioAccess();
     this.bindEvents();
     this.initDatabaseSession();
+    if (this.isStandaloneAdmin) this.openTeacherModal();
   }
 
   initDOM() {
@@ -206,7 +208,7 @@ export class UIManager {
                   <p id="teacher-modal-subtitle">Kirim dan pantau soal untuk mendukung pembelajaran aktif.</p>
                 </div>
               </div>
-              <button id="btn-teacher-close" class="modal-close-btn" aria-label="Tutup Mode Guru">&times;</button>
+              <button id="btn-teacher-close" class="modal-close-btn" aria-label="Tutup Mode Guru"><span class="modal-close-default" aria-hidden="true">&times;</span><span class="modal-close-back" aria-hidden="true">&larr;</span><span class="modal-close-label">Kembali ke Aplikasi</span></button>
             </div>
 
             <div id="teacher-dashboard-section" class="teacher-dashboard-section">
@@ -749,8 +751,14 @@ export class UIManager {
       this.closeTeacherModal();
     });
 
-    document.getElementById("btn-admin-login-open").addEventListener("click", () => this.showAdminLoginForm());
-    document.getElementById("btn-admin-login-cancel").addEventListener("click", () => this.hideAdminLoginForm());
+    document.getElementById("btn-admin-login-open").addEventListener("click", () => {
+      if (this.isStandaloneAdmin) this.showAdminLoginForm();
+      else window.location.assign("/admin.html");
+    });
+    document.getElementById("btn-admin-login-cancel").addEventListener("click", () => {
+      if (this.isStandaloneAdmin) this.closeTeacherModal();
+      else this.hideAdminLoginForm();
+    });
     document.getElementById("admin-login-form").addEventListener("submit", (event) => this.handleAdminLogin(event));
     document.getElementById("btn-admin-logout").addEventListener("click", () => this.handleAdminLogout());
 
@@ -3117,6 +3125,7 @@ export class UIManager {
       await ensureAnonymousAuth();
       this.adminSession = await getAdminSession().catch(() => null);
       this.configureStudioAccess();
+      if (this.isStandaloneAdmin && this.adminSession) this.activateStudioTab("tab-custom-questions");
     } catch (error) {
       console.warn("[Firebase] Sesi database anonim belum tersedia:", error);
     }
@@ -3125,17 +3134,28 @@ export class UIManager {
   configureStudioAccess() {
     const isAdmin = Boolean(this.adminSession);
     document.querySelectorAll('#teacher-dashboard-section .tab-btn[data-access="admin"]').forEach((button) => button.classList.toggle("hidden", !isAdmin));
-    document.getElementById("studio-public-session")?.classList.toggle("hidden", isAdmin);
+    document.querySelectorAll('#teacher-dashboard-section .tab-btn[data-access="public"]').forEach((button) => button.classList.toggle("hidden", this.isStandaloneAdmin));
+    document.getElementById("studio-public-session")?.classList.toggle("hidden", isAdmin || this.isStandaloneAdmin);
     document.getElementById("admin-session-panel")?.classList.toggle("hidden", !isAdmin);
-    document.getElementById("admin-login-form")?.classList.add("hidden");
+    document.getElementById("admin-login-form")?.classList.toggle("hidden", isAdmin || !this.isStandaloneAdmin);
     document.getElementById("admin-session-email").textContent = isAdmin ? (this.adminSession.user.email || "Administrator") : "";
     document.getElementById("studio-button-label").textContent = isAdmin ? "Admin" : "Studio";
-    document.getElementById("teacher-modal-title").textContent = isAdmin ? "Dashboard Administrator" : "Studio Kontribusi Soal";
-    document.getElementById("teacher-modal-eyebrow").textContent = isAdmin ? "PUSAT KONTROL APLIKASI" : "RUANG KONTRIBUSI PENDIDIK";
-    document.getElementById("teacher-modal-subtitle").textContent = isAdmin
+    const title = isAdmin ? "Dashboard Administrator" : this.isStandaloneAdmin ? "Portal Administrator" : "Studio Kontribusi Soal";
+    const eyebrow = isAdmin ? "PUSAT KONTROL APLIKASI" : this.isStandaloneAdmin ? "AKSES ADMIN TERLINDUNGI" : "RUANG KONTRIBUSI PENDIDIK";
+    const subtitle = isAdmin
       ? "Kelola bank soal, data pembelajaran, media, dan pengaturan aplikasi."
-      : "Kirim dan pantau soal untuk mendukung pembelajaran aktif.";
-    document.getElementById("teacher-modal")?.classList.toggle("admin-authenticated", isAdmin);
+      : this.isStandaloneAdmin
+        ? "Masuk untuk mengelola konten dan operasional Motion Smart Class."
+        : "Kirim dan pantau soal untuk mendukung pembelajaran aktif.";
+    document.getElementById("teacher-modal-title").textContent = title;
+    document.getElementById("teacher-modal-eyebrow").textContent = eyebrow;
+    document.getElementById("teacher-modal-subtitle").textContent = subtitle;
+    document.getElementById("btn-admin-login-cancel").textContent = this.isStandaloneAdmin ? "Kembali" : "Batal";
+    document.getElementById("btn-teacher-close").setAttribute("aria-label", this.isStandaloneAdmin ? "Kembali ke aplikasi" : "Tutup Studio");
+    const modal = document.getElementById("teacher-modal");
+    modal?.classList.toggle("admin-authenticated", isAdmin);
+    modal?.classList.toggle("standalone-admin", this.isStandaloneAdmin);
+    document.body.classList.toggle("admin-authenticated-page", this.isStandaloneAdmin && isAdmin);
   }
 
   showAdminLoginForm() {
@@ -3209,6 +3229,10 @@ export class UIManager {
   }
 
   closeTeacherModal() {
+    if (this.isStandaloneAdmin) {
+      window.location.assign("/");
+      return;
+    }
     document.getElementById("teacher-modal").classList.add("hidden");
   }
 
