@@ -3198,6 +3198,17 @@ body {
   color: #64748B;
   border: 1px solid #E2E8F0;
 }
+.question-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid #c4b5fd;
+  border-radius: 999px;
+  background: #f5f3ff;
+  color: #5b21b6;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
 
 /* Firebase Tab Dashboard */
 .firebase-panel-container {
@@ -4824,6 +4835,18 @@ body {
 .studio-database-note > span { font-size: 1.35rem; }
 .studio-database-note strong { display: block; }
 .studio-database-note p { margin: 3px 0 0; color: #47657a; font-size: .8rem; line-height: 1.45; }
+.studio-database-note > div { flex: 1; }
+.studio-access-panel { margin-bottom: 14px; }
+.admin-login-form { display: grid; grid-template-columns: minmax(190px,1fr) minmax(180px,1fr) minmax(160px,1fr) auto auto; gap: 10px; align-items: end; padding: 16px; border: 1px solid #c4b5fd; border-radius: 16px; background: linear-gradient(135deg,#f5f3ff,#eff6ff); }
+.admin-login-form > div:first-child { align-self: center; }
+.admin-login-form p { margin: 3px 0 0; color: var(--text-muted); font-size: .76rem; line-height: 1.4; }
+.admin-login-form label { display: grid; gap: 5px; color: var(--text-secondary); font-size: .76rem; font-weight: 800; }
+.admin-login-form input { min-width: 0; padding: 10px 11px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; }
+.admin-login-feedback { grid-column: 1 / -1; padding: 9px 11px; border-radius: 10px; font-size: .8rem; }
+.admin-login-feedback.error { border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
+.admin-session-panel { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; padding: 12px 15px; border: 1px solid #c4b5fd; border-radius: 14px; background: linear-gradient(135deg,#ede9fe,#eff6ff); color: #4c1d95; }
+.admin-session-panel div { display: grid; gap: 2px; }
+.admin-session-panel span { color: #64748b; font-size: .76rem; }
 .submission-list { display: grid; gap: 14px; margin-top: 16px; }
 .submission-card { padding: 18px; border: 1px solid #dbe3ef; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.05); }
 .submission-card-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
@@ -4846,4 +4869,7 @@ body {
 @media (max-width: 680px) {
   .submission-options, .multiplayer-report-grid { grid-template-columns: 1fr; }
   .submission-card-head { flex-direction: column; }
+  .admin-login-form { grid-template-columns: 1fr; }
+  .admin-login-feedback { grid-column: auto; }
+  .admin-session-panel, .studio-database-note { align-items: stretch; flex-direction: column; }
 }

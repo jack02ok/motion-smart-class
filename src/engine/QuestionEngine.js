@@ -4,6 +4,7 @@
  */
 
 import { DEFAULT_QUESTIONS, TRUE_FALSE_QUESTIONS, BOSS_QUESTIONS } from "../data/defaultQuestions.js";
+import { MODE_QUESTIONS } from "../data/modeQuestions.js";
 import { StorageManager } from "./StorageManager.js";
 import { FirestoreManager } from "./FirestoreManager.js";
 
@@ -12,6 +13,7 @@ export class QuestionEngine {
     this.defaultQuestions = DEFAULT_QUESTIONS;
     this.trueFalseQuestions = TRUE_FALSE_QUESTIONS;
     this.bossQuestions = BOSS_QUESTIONS;
+    this.modeQuestions = MODE_QUESTIONS;
     this.onlineQuestions = [];
     this.hasLoadedOnline = false;
   }
@@ -39,6 +41,9 @@ export class QuestionEngine {
 
     // 1. Base default questions
     this.defaultQuestions.forEach((q) => questionMap.set(q.id, q));
+
+    // 1b. Questions designed for specific game modes
+    this.modeQuestions.forEach((q) => questionMap.set(q.id, q));
 
     // 2. Custom questions from LocalStorage
     const custom = StorageManager.getCustomQuestions();
@@ -99,12 +104,20 @@ export class QuestionEngine {
       pool = pool.filter((q) => q.difficulty === difficulty || !q.difficulty);
     }
 
+    const dedicatedPool = pool.filter((question) => Array.isArray(question.gameModes) && question.gameModes.includes(mode));
+    const generalPool = pool.filter((question) => !Array.isArray(question.gameModes) || question.gameModes.length === 0);
+    let fallbackPool = generalPool;
+
     if (mode === "detective") {
-      // Prioritize questions with passages or detective context
-      const detectivePool = pool.filter((q) => q.passage || (q.topic && (q.topic.includes("Detektif") || q.topic.includes("Bacaan") || q.topic.includes("Cerita"))));
-      if (detectivePool.length >= 3) {
-        pool = detectivePool;
-      }
+      fallbackPool = generalPool.filter((question) => question.passage || (question.topic && /Detektif|Bacaan|Cerita/i.test(question.topic)));
+    }
+
+    // Dedicated mode questions always appear first; general questions only fill
+    // a session when filters leave fewer dedicated questions than requested.
+    if (dedicatedPool.length > 0) {
+      pool = [...this.shuffle(dedicatedPool), ...this.shuffle(fallbackPool)];
+    } else {
+      pool = generalPool.length > 0 ? generalPool : pool;
     }
 
     // If filtered pool is smaller than required count, fill with remaining from pool
@@ -112,7 +125,7 @@ export class QuestionEngine {
       pool = this.getAllQuestions();
     }
 
-    const shuffled = this.shuffle(pool);
+    const shuffled = dedicatedPool.length > 0 ? pool : this.shuffle(pool);
     const shouldShuffleOptions = StorageManager.getSettings().shuffleOptions;
     return shuffled.slice(0, Math.min(count, shuffled.length)).map((q) => {
       const normalized = { ...q, timeLimit: q.timeLimit || 40, pointWeight: q.pointWeight || 100 };

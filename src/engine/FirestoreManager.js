@@ -25,6 +25,7 @@ import {
 import { ensureAnonymousAuth, getDb, getCurrentUser, isFirebaseConfigured, getFirebaseConfig } from "../firebase.js";
 import { StorageManager } from "./StorageManager.js";
 import { cleanText, safeImageUrl } from "../utils/security.js";
+import { QUESTION_GAME_MODES } from "../data/modeQuestions.js";
 
 const QUESTIONS_COLLECTION = "questions";
 const SESSIONS_COLLECTION = "game_sessions";
@@ -50,6 +51,9 @@ export class FirestoreManager {
       imageLayout: ["contain", "wide", "compact"].includes(question.imageLayout) ? question.imageLayout : "contain",
       timeLimit: Math.min(120, Math.max(15, parseInt(question.timeLimit, 10) || 40)),
       pointWeight: Math.min(500, Math.max(50, parseInt(question.pointWeight, 10) || 100)),
+      gameModes: Array.isArray(question.gameModes)
+        ? [...new Set(question.gameModes.filter((mode) => QUESTION_GAME_MODES.includes(mode)))].slice(0, 4)
+        : [],
       gestureMap: question.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
       createdAt: question.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -140,28 +144,19 @@ export class FirestoreManager {
     return [];
   }
 
-  /**
-   * Add a new question to Firestore and mirror to local storage
-   */
+  /** Add a new question to Firestore, or local storage when cloud is unavailable. */
   static async saveQuestion(question) {
     const docId = question.id || "fs-q-" + Date.now();
     const cleanQuestion = this.sanitizeQuestion(question, { id: docId });
 
-    // Always mirror to localStorage custom questions
-    StorageManager.saveCustomQuestion(cleanQuestion);
-
-    // Save to Firestore if configured
     const status = this.getStatus();
     if (status.isConfigured) {
-      try {
-        const db = getDb();
-        if (db) {
-          await setDoc(doc(db, QUESTIONS_COLLECTION, docId), cleanQuestion);
-          console.log(`[Firestore] Successfully saved question ${docId} to Firestore.`);
-        }
-      } catch (err) {
-        console.error("[Firestore] Error saving question to Firestore:", err);
-      }
+      const db = getDb();
+      if (!db) throw new Error("Cloud Firestore belum tersedia.");
+      await setDoc(doc(db, QUESTIONS_COLLECTION, docId), cleanQuestion);
+      console.log(`[Firestore] Successfully saved question ${docId} to Firestore.`);
+    } else {
+      StorageManager.saveCustomQuestion(cleanQuestion);
     }
 
     return cleanQuestion;

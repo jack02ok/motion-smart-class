@@ -38,9 +38,12 @@ Sebelum permainan dimulai, siswa dipandu melalui proses kalibrasi visual:
 - Papan skor real-time terpampang di beranda dan dapat disesuaikan oleh guru.
 
 ### 5. Mode Guru (Teacher Mode)
-- Aplikasi tidak menampilkan login. Firebase Anonymous Authentication membuat identitas teknis per sesi agar database tetap aman dan dapat digunakan.
+- Siswa dan pengguna umum tidak perlu login. Firebase Anonymous Authentication membuat identitas teknis per sesi agar database tetap aman.
+- Login Email/Password hanya tersedia untuk admin. Setelah role `owner` atau `super_admin` terverifikasi di Firestore, admin dapat membuka bank soal, review, analitik, pengaturan kelas, tim, media, dan konfigurasi database.
 - Statistik, progres, dan riwayat lokal disimpan di `sessionStorage` selama sesi tab aktif. Ringkasan hasil tanpa video/biometrik dapat dicatat ke Firestore dengan UID anonim.
 - Pengguna dapat mengirim soal ke antrean review Firestore. Publikasi dan moderasi dilakukan oleh pengelola melalui Firebase Console atau Admin SDK.
+- **115 soal bawaan:** 50 soal umum, 8 Benar/Salah, 5 Boss, dan 52 soal khusus yang diprioritaskan untuk Detektif, Tantangan Gerak, Arena, Duel/Tim, Kooperatif, serta Petualangan.
+- **Target mode pada soal:** Soal impor JSON/CSV/XLS/XLSX maupun soal buatan dapat diberi `gameModes` agar hanya diprioritaskan pada mode yang sesuai.
 - **Pengaturan Waktu & Sensitivitas:** Mengatur durasi per soal, kepekaan *confidence threshold*, durasi *hold/cooldown*, dan waktu bersiap gerakan 3–10 detik (default 5 detik).
 - **Question Editor (Pembuat Soal):** Form interaktif untuk menambah soal baru, termasuk gambar pendukung dari link HTTPS dan deskripsi gambar.
 - **Ekspor Data:** Fitur ekspor bank soal tambahan ke format JSON; `imageUrl` dan `imageAlt` ikut tersimpan agar gambar muncul kembali saat file diimpor.
@@ -75,7 +78,8 @@ motion-smart-class/
 │   ├── main.js                 # Orchestrator aplikasi utama
 │   ├── style.css               # Desain modern game show, responsive & PID
 │   ├── data/
-│   │   └── defaultQuestions.js # Bank soal 50+ Numerasi & Literasi SD Kelas 1-6
+│   │   ├── defaultQuestions.js # Bank soal 50+ Numerasi & Literasi SD Kelas 1-6
+│   │   └── modeQuestions.js    # 52 soal khusus berdasarkan mode permainan
 │   └── engine/
 │       ├── AudioManager.js     # Web Audio API Synthesizer (100% offline)
 │       ├── StorageManager.js   # LocalStorage untuk soal guru, pengaturan & tim
@@ -130,20 +134,21 @@ npm run check
 
 ## 🔐 Konfigurasi Firebase yang aman
 
-1. Aktifkan provider **Anonymous** di Firebase Authentication. Provider Google tidak diperlukan.
+1. Aktifkan provider **Anonymous** dan **Email/Password** di Firebase Authentication. Provider Google tidak diperlukan.
 2. Pastikan domain produksi tersedia di konfigurasi proyek Firebase.
-3. Isi seluruh konfigurasi Web App pada environment deployment: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, dan `VITE_FIREBASE_APP_ID`. `.env.example` hanya contoh dan tidak otomatis dipakai saat build.
+3. Isi seluruh konfigurasi Web App pada environment deployment: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, dan `VITE_ADMIN_EMAIL`. `.env.example` hanya contoh dan tidak otomatis dipakai saat build. Jangan pernah menaruh password admin pada environment Vite atau repository.
 4. Deploy `firestore.rules` dari repository ini.
-5. Lakukan publikasi, moderasi, dan penghapusan soal dari Firebase Console atau backend Admin SDK tepercaya.
+5. Buat akun admin pada Firebase Authentication. Salin UID-nya, lalu buat dokumen `users/{uid}` di Firestore dengan field `uid`, `email`, dan `role: "owner"` atau `role: "super_admin"`.
 6. Aktifkan Firebase App Check untuk deployment produksi.
 
 Koleksi utama:
 
 - `game_sessions`: ringkasan sesi milik UID anonim saat itu.
+- `users`: profil dan role admin yang mengendalikan hak akses pengaturan.
 - `question_submissions`: antrean kontribusi dengan status `pending`, `approved`, atau `rejected`.
 - `questions`: hanya berisi soal yang sudah diterbitkan admin.
 
-Semua perangkat memakai Firebase Anonymous untuk akses database dan multiplayer tanpa layar login. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban; kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca oleh UID anonim milik host room.
+Perangkat siswa memakai Firebase Anonymous untuk akses database dan multiplayer. Admin memakai sesi Email/Password selama tab browser aktif. Dokumen room yang dapat dibaca siswa tidak membawa kunci jawaban; kunci disimpan terpisah di `msc_room_secrets` dan hanya dapat dibaca oleh UID milik host room.
 
 > Jangan gunakan rules lama yang mengizinkan `allow read, write: if true`. Deploy rules terbaru sebelum mengaktifkan kontribusi soal.
 
