@@ -17,12 +17,28 @@ import {
   testFirestoreConnection,
   isFirebaseConfigured,
   validateFirebaseAuthConfig,
-  ensureAnonymousAuth
+  ensureAnonymousAuth,
+  getAdminSession,
+  getConfiguredAdminEmail,
+  signInAdmin,
+  signOutAdmin
 } from "../firebase.js";
 import { DEFAULT_QUESTIONS } from "../data/defaultQuestions.js";
+import { MODE_QUESTIONS } from "../data/modeQuestions.js";
 import { MultiplayerEngine, ROOM_STATUS } from "./MultiplayerEngine.js";
 import firestoreRules from "../../firestore.rules?raw";
 import { createQuestionWorkbook, downloadWorkbook, readQuestionWorkbook } from "../utils/questionSpreadsheet.js";
+
+const BUILT_IN_QUESTIONS = [...DEFAULT_QUESTIONS, ...MODE_QUESTIONS];
+const QUESTION_MODE_LABELS = Object.freeze({
+  detective: "Detektif",
+  motion_challenge: "Tantangan Gerak",
+  arena: "Arena",
+  duel: "Duel",
+  team_battle: "Pertarungan Tim",
+  cooperative: "Kooperatif",
+  adventure: "Petualangan"
+});
 
 export class UIManager {
   constructor({ appContainer, gameEngine, cameraManager, poseDetector, gestureEngine, audioManager }) {
@@ -39,6 +55,7 @@ export class UIManager {
     this.debugPanelEl = null;
     this.trainingGestures = new Set();
     this.reportedMultiplayerRooms = new Set();
+    this.adminSession = null;
 
     // Online Multiplayer Engine
     this.multiplayer = new MultiplayerEngine();
@@ -47,6 +64,7 @@ export class UIManager {
     };
 
     this.initDOM();
+    this.configureStudioAccess();
     this.bindEvents();
     this.initDatabaseSession();
   }
@@ -88,7 +106,7 @@ export class UIManager {
             </button>
 
             <!-- Teacher Mode Button -->
-            <button id="btn-teacher-open" class="hud-btn teacher-btn" title="Buka Mode Guru">
+            <button id="btn-teacher-open" class="hud-btn teacher-btn" title="Buka Studio atau akses admin">
               <span class="hud-icon">👨‍🏫</span>
               <span id="studio-button-label">Studio</span>
             </button>
@@ -185,18 +203,30 @@ export class UIManager {
             </div>
 
             <div id="teacher-dashboard-section" class="teacher-dashboard-section">
-              <div class="studio-database-note"><span aria-hidden="true">☁️</span><div><strong>Studio tanpa login</strong><p>Database menggunakan sesi anonim otomatis. Riwayat pribadi tetap sementara, sedangkan soal yang dikirim masuk ke antrean review Firestore.</p></div></div>
+              <div class="studio-access-panel">
+                <div id="studio-public-session" class="studio-database-note"><span aria-hidden="true">☁️</span><div><strong>Kontribusi tanpa login</strong><p>Pengguna dapat mengirim soal melalui sesi anonim. Pengaturan aplikasi dan publikasi soal hanya tersedia untuk admin.</p></div><button id="btn-admin-login-open" class="secondary-btn btn-sm" type="button">🔐 Masuk Admin</button></div>
+                <form id="admin-login-form" class="admin-login-form hidden" autocomplete="on">
+                  <div><strong>🔐 Login Administrator</strong><p>Gunakan akun Email/Password yang telah dibuat di Firebase Authentication.</p></div>
+                  <label>Email admin<input id="admin-email" type="email" autocomplete="username" required /></label>
+                  <label>Password<input id="admin-password" type="password" autocomplete="current-password" required /></label>
+                  <button id="btn-admin-login" class="primary-btn" type="submit">Masuk</button>
+                  <button id="btn-admin-login-cancel" class="secondary-btn" type="button">Batal</button>
+                  <div id="admin-login-feedback" class="admin-login-feedback hidden" role="alert"></div>
+                </form>
+                <div id="admin-session-panel" class="admin-session-panel hidden"><div><strong>🛡️ Mode Admin Aktif</strong><span id="admin-session-email"></span></div><button id="btn-admin-logout" class="secondary-btn btn-sm" type="button">Keluar Admin</button></div>
+              </div>
               <!-- Tabs -->
               <div class="modal-tabs">
-                <button class="tab-btn active" data-tab="tab-add-question">➕ Kirim Soal</button>
-                <button class="tab-btn" data-tab="tab-my-submissions">📝 Kontribusi Saya</button>
-                <button class="tab-btn" data-tab="tab-custom-questions">📋 Bank Soal</button>
-                <button class="tab-btn" data-tab="tab-analytics">📊 Analitik Belajar</button>
-                <button class="tab-btn" data-tab="tab-session-packages">🗂️ Paket Sesi</button>
-                <button class="tab-btn" data-tab="tab-media-library">🖼️ Media</button>
-                <button class="tab-btn" data-tab="tab-settings">⚙️ Pengaturan</button>
-                <button class="tab-btn" data-tab="tab-teams">👥 Skor 4 Tim</button>
-                <button class="tab-btn" data-tab="tab-firebase">🔥 Database</button>
+                <button class="tab-btn active" data-tab="tab-add-question" data-access="public">➕ Kirim Soal</button>
+                <button class="tab-btn" data-tab="tab-my-submissions" data-access="public">📝 Kontribusi Saya</button>
+                <button class="tab-btn" data-tab="tab-review-submissions" data-access="admin">✅ Review Soal</button>
+                <button class="tab-btn" data-tab="tab-custom-questions" data-access="admin">📋 Bank Soal</button>
+                <button class="tab-btn" data-tab="tab-analytics" data-access="admin">📊 Analitik Belajar</button>
+                <button class="tab-btn" data-tab="tab-session-packages" data-access="admin">🗂️ Paket Sesi</button>
+                <button class="tab-btn" data-tab="tab-media-library" data-access="admin">🖼️ Media</button>
+                <button class="tab-btn" data-tab="tab-settings" data-access="admin">⚙️ Pengaturan</button>
+                <button class="tab-btn" data-tab="tab-teams" data-access="admin">👥 Skor 4 Tim</button>
+                <button class="tab-btn" data-tab="tab-firebase" data-access="admin">🔥 Database</button>
               </div>
 
               <!-- Tab 1: Bank Soal Guru (List, Filter, Search, Import/Export, Edit, Delete) -->
@@ -273,6 +303,19 @@ export class UIManager {
                       <option value="hard">Sulit</option>
                     </select>
                   </div>
+                  <div class="filter-item">
+                    <span>Mode:</span>
+                    <select id="filter-q-mode">
+                      <option value="all">Semua Mode</option>
+                      <option value="general">Umum</option>
+                      <option value="detective">Detektif</option>
+                      <option value="motion_challenge">Tantangan Gerak</option>
+                      <option value="arena">Arena</option>
+                      <option value="team_battle">Pertarungan Tim</option>
+                      <option value="cooperative">Kooperatif</option>
+                      <option value="adventure">Petualangan</option>
+                    </select>
+                  </div>
                   <input type="text" id="filter-q-search" class="filter-search-input" placeholder="🔍 Cari pertanyaan atau topik materi..." />
                 </div>
 
@@ -333,6 +376,19 @@ export class UIManager {
                     <div class="form-group" style="flex: 1;">
                       <label>Bobot Skor (Poin):</label>
                       <input type="number" id="new-q-point-weight" min="50" max="500" step="10" value="100" required />
+                    </div>
+                    <div class="form-group" style="flex: 1.4;">
+                      <label>Mode Permainan:</label>
+                      <select id="new-q-game-mode">
+                        <option value="">Umum (semua mode)</option>
+                        <option value="detective">Detektif</option>
+                        <option value="motion_challenge">Tantangan Gerak</option>
+                        <option value="arena">Arena</option>
+                        <option value="duel">Duel</option>
+                        <option value="team_battle">Pertarungan Tim</option>
+                        <option value="cooperative">Kooperatif</option>
+                        <option value="adventure">Petualangan</option>
+                      </select>
                     </div>
                   </div>
 
@@ -412,6 +468,11 @@ export class UIManager {
               <div id="tab-my-submissions" class="tab-content">
                 <div class="feature-panel-header"><div><h3>📝 Kontribusi Soal Saya</h3><p>Pantau status pending, disetujui, atau ditolak oleh super admin.</p></div><button id="btn-refresh-my-submissions" class="secondary-btn btn-sm">Muat Ulang</button></div>
                 <div id="my-submissions-list" class="submission-list"></div>
+              </div>
+
+              <div id="tab-review-submissions" class="tab-content">
+                <div class="feature-panel-header"><div><h3>✅ Antrean Review Soal</h3><p>Setujui soal untuk menerbitkannya ke bank soal atau berikan catatan penolakan.</p></div><button id="btn-refresh-review-submissions" class="secondary-btn btn-sm">Muat Ulang</button></div>
+                <div id="review-submissions-list" class="submission-list"></div>
               </div>
 
               <!-- Session Packages -->
@@ -679,6 +740,11 @@ export class UIManager {
       this.closeTeacherModal();
     });
 
+    document.getElementById("btn-admin-login-open").addEventListener("click", () => this.showAdminLoginForm());
+    document.getElementById("btn-admin-login-cancel").addEventListener("click", () => this.hideAdminLoginForm());
+    document.getElementById("admin-login-form").addEventListener("submit", (event) => this.handleAdminLogin(event));
+    document.getElementById("btn-admin-logout").addEventListener("click", () => this.handleAdminLogout());
+
     // Teacher Modal Tabs
     document.querySelectorAll(".modal-tabs .tab-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
@@ -704,11 +770,14 @@ export class UIManager {
           this.renderFirebasePanel();
         } else if (tabId === "tab-my-submissions") {
           this.renderMySubmissions();
+        } else if (tabId === "tab-review-submissions") {
+          this.renderReviewSubmissions();
         }
       });
     });
 
     document.getElementById("btn-refresh-my-submissions")?.addEventListener("click", () => this.renderMySubmissions());
+    document.getElementById("btn-refresh-review-submissions")?.addEventListener("click", () => this.renderReviewSubmissions());
 
     // Flip Camera Button
     document.getElementById("btn-flip-cam").addEventListener("click", async () => {
@@ -840,6 +909,9 @@ export class UIManager {
         topic: document.getElementById("new-q-topic").value.trim(),
         timeLimit: parseInt(document.getElementById("new-q-time-limit").value, 10) || 40,
         pointWeight: parseInt(document.getElementById("new-q-point-weight").value, 10) || 100,
+        gameModes: document.getElementById("new-q-game-mode").value
+          ? [document.getElementById("new-q-game-mode").value]
+          : [],
         passage: document.getElementById("new-q-passage").value.trim(),
         question: document.getElementById("new-q-text").value.trim(),
         options: [
@@ -863,14 +935,26 @@ export class UIManager {
       submitButton.textContent = "Mengirim...";
       try {
         if (editId) {
-          StorageManager.updateCustomQuestion(editId, questionData);
-          alert("Perubahan soal lokal berhasil disimpan. Soal cloud dikelola melalui Firebase Console.");
+          const editingSource = document.getElementById("edit-q-id").dataset.source || "local";
+          if (editingSource === "firestore") {
+            if (!this.adminSession) throw new Error("Login admin diperlukan untuk mengubah soal cloud.");
+            await FirestoreManager.updateQuestion(editId, questionData);
+            await this.syncQuestionsFromFirestore(false);
+            alert("Perubahan soal cloud berhasil diterbitkan.");
+          } else {
+            StorageManager.updateCustomQuestion(editId, questionData);
+            alert("Perubahan soal lokal berhasil disimpan.");
+          }
+        } else if (this.adminSession) {
+          await FirestoreManager.saveQuestion(questionData);
+          await this.syncQuestionsFromFirestore(false);
+          alert("Soal baru berhasil diterbitkan ke bank soal.");
         } else {
           await FirestoreManager.submitQuestionForReview(questionData);
           alert("Soal berhasil dikirim. Super admin akan meninjau sebelum soal diterbitkan.");
         }
         this.resetQuestionForm();
-        if (editId) {
+        if (editId || this.adminSession) {
           this.activateStudioTab("tab-custom-questions");
           this.renderCustomQuestionsList();
         } else {
@@ -881,7 +965,7 @@ export class UIManager {
         alert(error.message || "Soal belum dapat dikirim.");
       } finally {
         submitButton.disabled = false;
-        submitButton.textContent = "Kirim untuk Review ✅";
+        submitButton.textContent = this.adminSession ? "Terbitkan Soal 💾" : "Kirim untuk Review ✅";
       }
     });
 
@@ -948,8 +1032,8 @@ export class UIManager {
       reader.readAsText(file);
     });
     document.getElementById("btn-download-csv-template")?.addEventListener("click", () => {
-      const headers = "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation\n";
-      const example = '"Berapa 6 x 7?",36,40,42,48,C,numerasi,4,medium,Perkalian,,,"6 x 7 = 42"\n';
+      const headers = "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,gameModes,imageUrl,imageAlt,explanation\n";
+      const example = '"Berapa 6 x 7?",36,40,42,48,C,numerasi,4,medium,Perkalian,motion_challenge,,,"6 x 7 = 42"\n';
       const link = document.createElement("a");
       link.href = `data:text/csv;charset=utf-8,${encodeURIComponent(headers + example)}`;
       link.download = "template_soal_motion_smart_class.csv";
@@ -1017,6 +1101,7 @@ export class UIManager {
     document.getElementById("filter-q-category").addEventListener("change", filterHandler);
     document.getElementById("filter-q-grade").addEventListener("change", filterHandler);
     document.getElementById("filter-q-diff").addEventListener("change", filterHandler);
+    document.getElementById("filter-q-mode").addEventListener("change", filterHandler);
     document.getElementById("filter-q-search").addEventListener("input", filterHandler);
 
     // Reset Teams button
@@ -1537,7 +1622,16 @@ export class UIManager {
             <button class="mode-play-btn">Mulai Kilat ⚡</button>
           </div>
 
-          <!-- Mode 9: Online Multiplayer Game Show -->
+          <!-- Mode 9: Motion Challenge -->
+          <div class="mode-card mode-quick" id="mode-btn-motion" style="border-top-color:#0D9488;">
+            <div class="mode-card-icon">🏃‍♀️</div>
+            <div class="mode-card-badge">Soal Ringkas &amp; Aktif</div>
+            <h3 class="mode-title">TANTANGAN GERAK</h3>
+            <p class="mode-desc">Jawab soal kilat khusus dengan pergantian pose yang cepat, jelas, dan ramah untuk pemanasan kelas.</p>
+            <button class="mode-play-btn" style="background:#0D9488;color:#fff;">Mulai Bergerak 🏃</button>
+          </div>
+
+          <!-- Mode 10: Online Multiplayer Game Show -->
           <div class="mode-card mode-multiplayer" id="mode-btn-online" style="border-top-color: #7C3AED;">
             <div class="mode-card-icon">🌐🏆</div>
             <div class="mode-card-badge">Real-Time Cloud</div>
@@ -1633,6 +1727,11 @@ export class UIManager {
     document.getElementById("mode-btn-quick").addEventListener("click", () => {
       this.audio.playClick();
       this.game.startSessionConfig({ mode: GAME_MODES.QUICK_QUIZ, category: "all" });
+    });
+
+    document.getElementById("mode-btn-motion").addEventListener("click", () => {
+      this.audio.playClick();
+      this.game.startSessionConfig({ mode: GAME_MODES.MOTION_CHALLENGE, category: "all" });
     });
 
     document.getElementById("mode-btn-tf").addEventListener("click", () => {
@@ -3007,9 +3106,78 @@ export class UIManager {
     if (!validateFirebaseAuthConfig().valid) return;
     try {
       await ensureAnonymousAuth();
+      this.adminSession = await getAdminSession().catch(() => null);
+      this.configureStudioAccess();
     } catch (error) {
       console.warn("[Firebase] Sesi database anonim belum tersedia:", error);
     }
+  }
+
+  configureStudioAccess() {
+    const isAdmin = Boolean(this.adminSession);
+    document.querySelectorAll('#teacher-dashboard-section .tab-btn[data-access="admin"]').forEach((button) => button.classList.toggle("hidden", !isAdmin));
+    document.getElementById("studio-public-session")?.classList.toggle("hidden", isAdmin);
+    document.getElementById("admin-session-panel")?.classList.toggle("hidden", !isAdmin);
+    document.getElementById("admin-login-form")?.classList.add("hidden");
+    document.getElementById("admin-session-email").textContent = isAdmin ? (this.adminSession.user.email || "Administrator") : "";
+    document.getElementById("studio-button-label").textContent = isAdmin ? "Admin" : "Studio";
+    document.getElementById("teacher-modal-title").textContent = isAdmin ? "🛡️ ADMIN STUDIO & PENGATURAN APLIKASI" : "🎒 STUDIO KONTRIBUSI SOAL";
+  }
+
+  showAdminLoginForm() {
+    const form = document.getElementById("admin-login-form");
+    const emailInput = document.getElementById("admin-email");
+    const feedback = document.getElementById("admin-login-feedback");
+    emailInput.value = getConfiguredAdminEmail();
+    document.getElementById("admin-password").value = "";
+    feedback.className = "admin-login-feedback hidden";
+    form.classList.remove("hidden");
+    emailInput.focus();
+  }
+
+  hideAdminLoginForm() {
+    document.getElementById("admin-login-form").classList.add("hidden");
+    document.getElementById("admin-password").value = "";
+  }
+
+  async handleAdminLogin(event) {
+    event.preventDefault();
+    const button = document.getElementById("btn-admin-login");
+    const feedback = document.getElementById("admin-login-feedback");
+    button.disabled = true;
+    button.textContent = "Memverifikasi...";
+    feedback.className = "admin-login-feedback hidden";
+    try {
+      this.adminSession = await signInAdmin(
+        document.getElementById("admin-email").value,
+        document.getElementById("admin-password").value
+      );
+      document.getElementById("admin-password").value = "";
+      this.configureStudioAccess();
+      this.activateStudioTab("tab-custom-questions");
+      await this.syncQuestionsFromFirestore(false);
+      this.renderCustomQuestionsList();
+    } catch (error) {
+      const messages = {
+        "auth/invalid-credential": "Email atau password admin tidak benar.",
+        "auth/user-disabled": "Akun admin dinonaktifkan di Firebase.",
+        "auth/too-many-requests": "Terlalu banyak percobaan. Tunggu beberapa menit lalu coba kembali.",
+        "auth/admin-role-required": "Akun valid, tetapi role Firestore belum owner atau super_admin.",
+        "auth/unauthorized-admin": "Email ini tidak terdaftar sebagai admin aplikasi."
+      };
+      feedback.textContent = messages[error.code] || error.message || "Login admin gagal.";
+      feedback.className = "admin-login-feedback error";
+    } finally {
+      button.disabled = false;
+      button.textContent = "Masuk";
+    }
+  }
+
+  async handleAdminLogout() {
+    await signOutAdmin();
+    this.adminSession = null;
+    this.configureStudioAccess();
+    this.activateStudioTab("tab-add-question");
   }
 
   activateStudioTab(tabId) {
@@ -3021,7 +3189,8 @@ export class UIManager {
   openTeacherModal() {
     const modal = document.getElementById("teacher-modal");
     modal.classList.remove("hidden");
-    this.activateStudioTab("tab-add-question");
+    this.configureStudioAccess();
+    this.activateStudioTab(this.adminSession ? "tab-custom-questions" : "tab-add-question");
     this.resetQuestionForm();
   }
 
@@ -3029,14 +3198,15 @@ export class UIManager {
     document.getElementById("teacher-modal").classList.add("hidden");
   }
 
-  renderSubmissionCard(submission) {
+  renderSubmissionCard(submission, { review = false } = {}) {
     const question = submission.question || {};
     const statusLabel = { pending: "Menunggu review", approved: "Disetujui", rejected: "Ditolak" }[submission.status] || submission.status;
     return `<article class="submission-card">
       <div class="submission-card-head"><div><span class="submission-status status-${escapeHTML(submission.status || "pending")}">${escapeHTML(statusLabel)}</span><h4>${escapeHTML(question.question || "Soal tanpa judul")}</h4></div><small>${new Date(submission.submittedAt).toLocaleString("id-ID")}</small></div>
-      <p class="submission-meta">${escapeHTML(question.category || "-")} · Kelas ${Number(question.grade) || "-"} · ${escapeHTML(question.topic || "-")}</p>
+      <p class="submission-meta">${escapeHTML(question.category || "-")} · Kelas ${Number(question.grade) || "-"} · ${escapeHTML(question.topic || "-")}${review ? ` · oleh ${escapeHTML(submission.ownerName || "Pengguna")}` : ""}</p>
       <ol class="submission-options">${(question.options || []).map((option, index) => `<li class="${index === question.correctAnswer ? "correct" : ""}">${escapeHTML(option)}</li>`).join("")}</ol>
       ${submission.reviewNote ? `<p class="review-note"><strong>Catatan reviewer:</strong> ${escapeHTML(submission.reviewNote)}</p>` : ""}
+      ${review && submission.status === "pending" ? `<div class="submission-review-actions"><button class="primary-btn btn-sm approve-submission" data-id="${escapeHTML(submission.id)}">Setujui & Terbitkan</button><button class="secondary-btn btn-sm reject-submission" data-id="${escapeHTML(submission.id)}">Tolak</button></div>` : ""}
     </article>`;
   }
 
@@ -3049,6 +3219,36 @@ export class UIManager {
       container.innerHTML = submissions.length ? submissions.map((item) => this.renderSubmissionCard(item)).join("") : '<div class="empty-list-msg"><p>Belum ada soal yang Anda kirim.</p></div>';
     } catch (error) {
       container.innerHTML = `<div class="empty-list-msg"><p>Kontribusi belum dapat dimuat: ${escapeHTML(error.message || "akses ditolak")}</p></div>`;
+    }
+  }
+
+  async renderReviewSubmissions() {
+    const container = document.getElementById("review-submissions-list");
+    if (!container || !this.adminSession) return;
+    container.innerHTML = "<p>Memuat antrean review...</p>";
+    try {
+      const submissions = await FirestoreManager.fetchQuestionSubmissions({ status: "pending" });
+      container.innerHTML = submissions.length
+        ? submissions.map((item) => this.renderSubmissionCard(item, { review: true })).join("")
+        : '<div class="empty-list-msg"><p>Antrean review sudah kosong.</p></div>';
+      container.querySelectorAll(".approve-submission, .reject-submission").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const decision = button.classList.contains("approve-submission") ? "approved" : "rejected";
+          if (!confirm(decision === "approved" ? "Setujui dan terbitkan soal ini?" : "Tolak pengajuan soal ini?")) return;
+          const note = prompt("Catatan review (opsional):", "") || "";
+          button.disabled = true;
+          try {
+            await FirestoreManager.reviewQuestionSubmission(button.dataset.id, decision, note);
+            await this.renderReviewSubmissions();
+            if (decision === "approved") await this.syncQuestionsFromFirestore(false);
+          } catch (error) {
+            alert(error.message || "Review belum dapat disimpan.");
+            button.disabled = false;
+          }
+        });
+      });
+    } catch (error) {
+      container.innerHTML = `<div class="empty-list-msg"><p>Antrean belum dapat dimuat: ${escapeHTML(error.message || "akses ditolak")}</p></div>`;
     }
   }
 
@@ -3079,7 +3279,7 @@ export class UIManager {
       container.innerHTML = `
         <div class="empty-list-msg">
           <p>Belum ada soal tambahan yang dibuat guru.</p>
-          <p class="sub">Klik tombol <strong>"➕ Tambah Soal Baru"</strong> atau gunakan tombol <strong>"🚀 Unggah Soal Default ke Cloud"</strong> untuk memuat soal ke Bank Soal Cloud.</p>
+          <p class="sub">Klik tombol <strong>"➕ Tambah Soal Baru"</strong> atau impor JSON, CSV, XLS, maupun XLSX untuk menambahkan soal.</p>
         </div>
       `;
       return;
@@ -3098,6 +3298,7 @@ export class UIManager {
           document.getElementById("filter-q-category").value = "all";
           document.getElementById("filter-q-grade").value = "all";
           document.getElementById("filter-q-diff").value = "all";
+          document.getElementById("filter-q-mode").value = "all";
           document.getElementById("filter-q-search").value = "";
           this.renderCustomQuestionsList();
         });
@@ -3121,9 +3322,10 @@ export class UIManager {
               </span>
               <span style="font-size: 0.75rem; background: #E2E8F0; padding: 2px 8px; border-radius: 4px; font-weight:700;">⏱️ ${q.timeLimit || 40}s</span>
               <span style="font-size: 0.75rem; background: #FEF3C7; color: #92400E; padding: 2px 8px; border-radius: 4px; font-weight:700;">⭐ ${q.pointWeight || 100} pts</span>
+              ${(q.gameModes || []).map((mode) => `<span class="question-mode-badge">🎮 ${escapeHTML(QUESTION_MODE_LABELS[mode] || mode)}</span>`).join("")}
               <span style="font-size: 0.78rem; font-weight: 800; color: var(--text-secondary);">${escapeHTML(q.topic || "Materi")}</span>
             </div>
-            ${q.source !== "firestore" && q.source !== "seed" ? `<div style="display:flex; gap: 6px;">
+            ${this.adminSession || (q.source !== "firestore" && q.source !== "seed") ? `<div style="display:flex; gap: 6px;">
               <button class="edit-q-btn" data-id="${escapeHTML(q.id)}">✏️ Edit</button>
               <button class="delete-q-btn" data-id="${escapeHTML(q.id)}">🗑️ Hapus</button>
             </div>` : ""}
@@ -3163,7 +3365,18 @@ export class UIManager {
         const id = btn.getAttribute("data-id");
         if (confirm("Apakah Anda yakin ingin menghapus soal ini dari Bank Soal?")) {
           this.audio.playClick();
-          StorageManager.deleteCustomQuestion(id);
+          const question = this.getCombinedQuestionsList().find((item) => item.id === id);
+          if (question?.source === "firestore") {
+            if (!this.adminSession) return;
+            const deleted = await FirestoreManager.deleteQuestion(id);
+            if (!deleted) {
+              alert("Soal cloud belum dapat dihapus.");
+              return;
+            }
+            await this.syncQuestionsFromFirestore(false);
+          } else {
+            StorageManager.deleteCustomQuestion(id);
+          }
           this.applyQuestionFilters();
         }
       });
@@ -3174,6 +3387,7 @@ export class UIManager {
     const category = document.getElementById("filter-q-category") ? document.getElementById("filter-q-category").value : "all";
     const grade = document.getElementById("filter-q-grade") ? document.getElementById("filter-q-grade").value : "all";
     const diff = document.getElementById("filter-q-diff") ? document.getElementById("filter-q-diff").value : "all";
+    const mode = document.getElementById("filter-q-mode") ? document.getElementById("filter-q-mode").value : "all";
     const search = document.getElementById("filter-q-search") ? document.getElementById("filter-q-search").value.toLowerCase().trim() : "";
 
     let list = this.getCombinedQuestionsList();
@@ -3186,6 +3400,11 @@ export class UIManager {
     }
     if (diff !== "all") {
       list = list.filter((q) => q.difficulty === diff);
+    }
+    if (mode === "general") {
+      list = list.filter((q) => !Array.isArray(q.gameModes) || q.gameModes.length === 0);
+    } else if (mode !== "all") {
+      list = list.filter((q) => Array.isArray(q.gameModes) && q.gameModes.includes(mode));
     }
     if (search) {
       list = list.filter(
@@ -3201,17 +3420,19 @@ export class UIManager {
 
   populateEditQuestion(questionId) {
     this.audio.playClick();
-    const questions = StorageManager.getCustomQuestions();
+    const questions = this.getCombinedQuestionsList();
     const q = questions.find((item) => item.id === questionId);
     if (!q) return;
 
     document.getElementById("edit-q-id").value = q.id;
+    document.getElementById("edit-q-id").dataset.source = q.source || "local";
     document.getElementById("new-q-category").value = q.category || "numerasi";
     document.getElementById("new-q-grade").value = q.grade || 4;
     document.getElementById("new-q-difficulty").value = q.difficulty || "medium";
     document.getElementById("new-q-topic").value = q.topic || "";
     document.getElementById("new-q-time-limit").value = q.timeLimit || 40;
     document.getElementById("new-q-point-weight").value = q.pointWeight || 100;
+    document.getElementById("new-q-game-mode").value = q.gameModes?.[0] || "";
     document.getElementById("new-q-passage").value = q.passage || "";
     document.getElementById("new-q-image-url").value = q.imageUrl || "";
     document.getElementById("new-q-image-alt").value = q.imageAlt || "";
@@ -3249,15 +3470,17 @@ export class UIManager {
   resetQuestionForm() {
     document.getElementById("form-add-question").reset();
     document.getElementById("edit-q-id").value = "";
+    document.getElementById("edit-q-id").dataset.source = "";
     document.getElementById("new-q-time-limit").value = 40;
     document.getElementById("new-q-point-weight").value = 100;
+    document.getElementById("new-q-game-mode").value = "";
     this.updateQuestionImagePreview();
 
     const banner = document.getElementById("editing-banner");
     if (banner) banner.classList.add("hidden");
 
     const submitBtn = document.getElementById("btn-submit-question");
-    if (submitBtn) submitBtn.textContent = "Kirim untuk Review ✅";
+    if (submitBtn) submitBtn.textContent = this.adminSession ? "Terbitkan Soal 💾" : "Kirim untuk Review ✅";
 
     const cancelBtn = document.getElementById("btn-cancel-edit");
     if (cancelBtn) cancelBtn.classList.add("hidden");
@@ -3729,7 +3952,7 @@ export class UIManager {
       return;
     }
 
-    const proceed = confirm(`Apakah Anda yakin ingin mengunggah seluruh ${DEFAULT_QUESTIONS.length} soal default kurikulum ke Cloud Firestore (koleksi 'questions')?`);
+    const proceed = confirm(`Apakah Anda yakin ingin mengunggah seluruh ${BUILT_IN_QUESTIONS.length} soal bawaan dan soal khusus mode ke Cloud Firestore (koleksi 'questions')?`);
     if (!proceed) return;
 
     const progressContainer = document.getElementById("fb-seed-progress-container");
@@ -3739,14 +3962,14 @@ export class UIManager {
     if (progressContainer) progressContainer.classList.remove("hidden");
 
     try {
-      await FirestoreManager.seedQuestionsToFirestore(DEFAULT_QUESTIONS, ({ current, total, percentage }) => {
+      await FirestoreManager.seedQuestionsToFirestore(BUILT_IN_QUESTIONS, ({ current, total, percentage }) => {
         if (progressBar) progressBar.style.width = `${percentage}%`;
         if (progressText) progressText.textContent = `Mengunggah: ${current} dari ${total} soal (${percentage}%)...`;
       });
 
       this.audio.playWin();
       confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
-      alert(`🎉 Sukses! Sebanyak ${DEFAULT_QUESTIONS.length} soal default berhasil diunggah ke Cloud Firestore!`);
+      alert(`🎉 Sukses! Sebanyak ${BUILT_IN_QUESTIONS.length} soal bawaan berhasil diunggah ke Cloud Firestore!`);
 
       // Auto-sync after seed
       await this.syncQuestionsFromFirestore(false);

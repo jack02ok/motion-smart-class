@@ -21,7 +21,7 @@ service cloud.firestore {
       return question.keys().hasOnly([
           'id', 'category', 'topic', 'grade', 'difficulty', 'passage',
           'question', 'options', 'correctAnswer', 'explanation', 'timeLimit',
-          'pointWeight', 'gestureMap', 'imageUrl', 'imageAlt', 'imageLayout', 'createdAt', 'updatedAt', 'source'
+          'pointWeight', 'gameModes', 'gestureMap', 'imageUrl', 'imageAlt', 'imageLayout', 'createdAt', 'updatedAt', 'source'
         ])
         && question.question is string
         && question.question.size() > 0
@@ -31,7 +31,15 @@ service cloud.firestore {
         && question.options.size() <= 4
         && question.correctAnswer is int
         && question.correctAnswer >= 0
-        && question.correctAnswer < question.options.size();
+        && question.correctAnswer < question.options.size()
+        && (!('gameModes' in question) || (
+          question.gameModes is list
+          && question.gameModes.size() <= 4
+          && question.gameModes.hasOnly([
+            'detective', 'motion_challenge', 'arena', 'duel',
+            'team_battle', 'cooperative', 'adventure'
+          ])
+        ));
     }
 
     function validQuestion() {

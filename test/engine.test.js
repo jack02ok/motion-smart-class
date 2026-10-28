@@ -88,11 +88,11 @@ async function runTests() {
   console.log("✓ importCustomQuestions (Valid JSON): PASS");
 
   const csvResult = StorageManager.importQuestionsFromCSV([
-    "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,imageUrl,imageAlt,explanation",
-    '"Hasil 5 + 5?",8,9,10,11,C,numerasi,2,easy,Penjumlahan,,,"Lima ditambah lima"'
+    "question,optionA,optionB,optionC,optionD,correctAnswer,category,grade,difficulty,topic,gameModes,imageUrl,imageAlt,explanation",
+    '"Hasil 5 + 5?",8,9,10,11,C,numerasi,2,easy,Penjumlahan,motion_challenge,,,"Lima ditambah lima"'
   ].join("\n"));
   assert.strictEqual(csvResult.success, true);
-  assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2));
+  assert.ok(StorageManager.getCustomQuestions().some((q) => q.question === "Hasil 5 + 5?" && q.correctAnswer === 2 && q.gameModes.includes("motion_challenge")));
   const generatedQuestionIds = StorageManager.getCustomQuestions().map((question) => question.id);
   assert.strictEqual(new Set(generatedQuestionIds).size, generatedQuestionIds.length, "Rapid imports must always generate unique IDs");
   console.log("✓ importQuestionsFromCSV: PASS");
@@ -107,6 +107,7 @@ async function runTests() {
     grade: 3,
     difficulty: "easy",
     topic: "Pembagian",
+    gameModes: ["cooperative"],
     imageUrl: "https://images.example.edu/halves.png",
     imageAlt: "Sepuluh benda dibagi dua kelompok",
     imageLayout: "compact",
@@ -123,6 +124,7 @@ async function runTests() {
     assert.strictEqual(parsedExcel[0].correctAnswer, 1);
     assert.strictEqual(parsedExcel[0].grade, 3);
     assert.strictEqual(parsedExcel[0].imageLayout, "compact");
+    assert.deepStrictEqual(parsedExcel[0].gameModes, ["cooperative"]);
   }
   console.log("✓ XLS/XLSX question workbook round-trip: PASS");
 
@@ -197,6 +199,25 @@ async function runTests() {
   assert.strictEqual(tfQuestions.length, 4);
   assert.strictEqual(tfQuestions[0].options.length, 2);
   console.log("✓ getQuestions (True/False mode): PASS");
+
+  const { MODE_QUESTION_COUNTS, MODE_QUESTIONS } = await import("../src/data/modeQuestions.js");
+  const requiredModeCounts = {
+    detective: 8,
+    motion_challenge: 8,
+    arena: 6,
+    duel: 8,
+    team_battle: 8,
+    cooperative: 10,
+    adventure: 12
+  };
+  Object.entries(requiredModeCounts).forEach(([mode, count]) => {
+    assert.ok(MODE_QUESTION_COUNTS[mode] >= count, `${mode} needs a complete dedicated question bank`);
+    const modeQuestions = qEngine.getQuestions({ mode, count });
+    assert.strictEqual(modeQuestions.length, count, `${mode} must return the requested number of questions`);
+    assert.ok(modeQuestions.every((question) => question.gameModes?.includes(mode)), `${mode} must prioritize its dedicated bank`);
+  });
+  assert.strictEqual(new Set(MODE_QUESTIONS.map((question) => question.id)).size, MODE_QUESTIONS.length, "Mode question IDs must be unique");
+  console.log("✓ mode-specific question banks: PASS");
 
   // 3. Test ScoreEngine & Analytics
   console.log("\n[3] Testing ScoreEngine & Learning Analytics (Tahap 6)...");
@@ -534,19 +555,22 @@ async function runTests() {
     options: ["3", "4", "5", "6", "7"],
     correctAnswer: 1,
     grade: 99,
+    gameModes: ["arena", "invalid-mode", "arena"],
     imageUrl: "javascript:alert(1)"
   });
   assert.strictEqual(sanitizedQuestion.question, "Berapa 2 + 2?");
   assert.strictEqual(sanitizedQuestion.options.length, 4);
   assert.strictEqual(sanitizedQuestion.grade, 6);
   assert.strictEqual(sanitizedQuestion.imageUrl, "");
+  assert.deepStrictEqual(sanitizedQuestion.gameModes, ["arena"]);
   console.log("✓ Moderated question sanitization: PASS");
-  const { isFirebaseConfigured, validateFirebaseAuthConfig, saveFirebaseConfig, getFirebaseConfig, resetFirebaseConfig } = await import("../src/firebase.js");
+  const { isFirebaseConfigured, validateFirebaseAuthConfig, saveFirebaseConfig, getFirebaseConfig, getConfiguredAdminEmail, resetFirebaseConfig } = await import("../src/firebase.js");
 
   // Test Firebase Config Validator
   assert.strictEqual(isFirebaseConfigured({ projectId: "" }), false, "Empty projectId is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "your-project-id" }), false, "Placeholder is not configured");
   assert.strictEqual(isFirebaseConfigured({ projectId: "msc-sd-negeri-1" }), true, "Valid projectId is configured");
+  assert.strictEqual(getConfiguredAdminEmail(), "jakasaputra210@gmail.com", "The requested admin email must be configured");
   assert.deepStrictEqual(
     validateFirebaseAuthConfig({ projectId: "msc", apiKey: "key", authDomain: "msc.firebaseapp.com", appId: "1:web:abc" }).missingFields,
     [],

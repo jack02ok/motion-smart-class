@@ -5,16 +5,23 @@
  */
 
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, getDocs, limit, query } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, limit, query } from "firebase/firestore";
 import {
   browserSessionPersistence,
   getAuth,
   setPersistence,
+  signInWithEmailAndPassword,
   signInAnonymously,
   signOut
 } from "firebase/auth";
 
 const STORAGE_CONFIG_KEY = "MSC_FIREBASE_CONFIG";
+const ADMIN_ROLES = new Set(["super_admin", "owner"]);
+
+export function getConfiguredAdminEmail() {
+  const env = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
+  return String(env.VITE_ADMIN_EMAIL || "jakasaputra210@gmail.com").trim().toLowerCase();
+}
 
 /**
  * Resolve active Firebase configuration from:
@@ -161,9 +168,46 @@ export async function ensureAnonymousAuth() {
   if (!auth) return null;
   await setPersistence(auth, browserSessionPersistence);
   if (auth.currentUser?.isAnonymous) return auth.currentUser;
-  if (auth.currentUser) await signOut(auth);
+  if (auth.currentUser) return auth.currentUser;
   const credential = await signInAnonymously(auth);
   return credential.user;
+}
+
+export async function getAdminSession() {
+  const auth = getAuthInstance();
+  const user = auth?.currentUser;
+  if (!user || user.isAnonymous) return null;
+  const db = getDb();
+  if (!db) return null;
+  const snapshot = await getDoc(doc(db, "users", user.uid));
+  if (!snapshot.exists() || !ADMIN_ROLES.has(snapshot.data().role)) return null;
+  return { user, profile: { uid: user.uid, ...snapshot.data() } };
+}
+
+export async function signInAdmin(email, password) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const expectedEmail = getConfiguredAdminEmail();
+  if (!normalizedEmail || !password) throw Object.assign(new Error("Email dan password wajib diisi."), { code: "auth/missing-credentials" });
+  if (expectedEmail && normalizedEmail !== expectedEmail) {
+    throw Object.assign(new Error("Email ini tidak terdaftar sebagai admin aplikasi."), { code: "auth/unauthorized-admin" });
+  }
+  const auth = getAuthInstance();
+  if (!auth || !getDb()) throw new Error("Firebase belum dikonfigurasi.");
+  await setPersistence(auth, browserSessionPersistence);
+  const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+  const admin = await getAdminSession();
+  if (!admin) {
+    await signOut(auth);
+    await ensureAnonymousAuth().catch(() => null);
+    throw Object.assign(new Error("Akun belum memiliki role owner atau super_admin di Firestore."), { code: "auth/admin-role-required" });
+  }
+  return admin;
+}
+
+export async function signOutAdmin() {
+  const auth = getAuthInstance();
+  if (auth?.currentUser) await signOut(auth);
+  return ensureAnonymousAuth();
 }
 
 /**

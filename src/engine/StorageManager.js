@@ -1,4 +1,5 @@
 import { cleanText, safeImageUrl } from "../utils/security.js";
+import { QUESTION_GAME_MODES } from "../data/modeQuestions.js";
 
 let localIdSequence = 0;
 
@@ -164,6 +165,7 @@ export class StorageManager {
         grade: valueAt(cells, "grade") || 4,
         difficulty: valueAt(cells, "difficulty") || "medium",
         topic: valueAt(cells, "topic") || "Materi Umum",
+        gameModes: valueAt(cells, "gamemodes").split(/[|;]/).map((mode) => mode.trim()).filter(Boolean),
         imageUrl: valueAt(cells, "imageurl"),
         imageAlt: valueAt(cells, "imagealt"),
         explanation: valueAt(cells, "explanation")
@@ -291,6 +293,9 @@ export class StorageManager {
           imageLayout: ["contain", "wide", "compact"].includes(item.imageLayout) ? item.imageLayout : "contain",
           timeLimit: parseInt(item.timeLimit, 10) || 40,
           pointWeight: parseInt(item.pointWeight, 10) || 100,
+          gameModes: Array.isArray(item.gameModes)
+            ? [...new Set(item.gameModes.filter((mode) => QUESTION_GAME_MODES.includes(mode)))].slice(0, 4)
+            : [],
           gestureMap: item.gestureMap || { A: "LEFT_HAND", B: "RIGHT_HAND", C: "BOTH_HANDS", D: "SQUAT" },
           createdAt: new Date().toISOString()
         };

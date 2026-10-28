@@ -185,7 +185,16 @@ export class GameEngine {
     }
 
     if (this.selectedMode === GAME_MODES.TEAM_BATTLE) {
+      this.selectedGrade = "all";
+      this.selectedDifficulty = "all";
       this.setState(GAME_STATES.TEAM_SETUP);
+      return;
+    }
+
+    if (this.selectedMode === GAME_MODES.MOTION_CHALLENGE) {
+      this.selectedGrade = "all";
+      this.selectedDifficulty = "all";
+      this.setState(GAME_STATES.CALIBRATION);
       return;
     }
 

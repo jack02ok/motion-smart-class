@@ -1,4 +1,5 @@
 import { cleanText, safeImageUrl } from "./security.js";
+import { QUESTION_GAME_MODES } from "../data/modeQuestions.js";
 
 export const QUESTION_SHEET_HEADERS = [
   "id",
@@ -12,6 +13,7 @@ export const QUESTION_SHEET_HEADERS = [
   "grade",
   "difficulty",
   "topic",
+  "gameModes",
   "passage",
   "imageUrl",
   "imageAlt",
@@ -53,6 +55,10 @@ export function worksheetRowsToQuestions(rows) {
     grade: Number(cellValue(row, ["grade", "kelas"])) || 4,
     difficulty: cleanText(cellValue(row, ["difficulty", "kesulitan"]), 30).toLowerCase(),
     topic: cleanText(cellValue(row, ["topic", "topik"]), 100),
+    gameModes: String(cellValue(row, ["gameModes", "modePermainan"]) || "")
+      .split(/[|;,]/)
+      .map((mode) => mode.trim())
+      .filter((mode) => QUESTION_GAME_MODES.includes(mode)),
     passage: cleanText(cellValue(row, ["passage", "bacaan"]), 3000),
     imageUrl: safeImageUrl(cellValue(row, ["imageUrl", "urlGambar", "gambar"])),
     imageAlt: cleanText(cellValue(row, ["imageAlt", "deskripsiGambar"]), 160),
@@ -91,6 +97,7 @@ export async function createQuestionWorkbook(questions, bookType = "xlsx") {
     grade: Number(question.grade) || 4,
     difficulty: ["easy", "medium", "hard"].includes(question.difficulty) ? question.difficulty : "medium",
     topic: cleanText(question.topic, 100),
+    gameModes: Array.isArray(question.gameModes) ? question.gameModes.join(";") : "",
     passage: cleanText(question.passage, 3000),
     imageUrl: safeImageUrl(question.imageUrl),
     imageAlt: cleanText(question.imageAlt, 160),
@@ -103,7 +110,7 @@ export async function createQuestionWorkbook(questions, bookType = "xlsx") {
   worksheet["!cols"] = QUESTION_SHEET_HEADERS.map((header) => ({
     wch: ["question", "passage", "explanation"].includes(header) ? 42 : header.startsWith("option") ? 24 : header.includes("image") ? 30 : 16
   }));
-  worksheet["!autofilter"] = { ref: `A1:R${rows.length + 1}` };
+  worksheet["!autofilter"] = { ref: `A1:S${rows.length + 1}` };
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Soal");
   const normalizedType = bookType === "xls" ? "xls" : "xlsx";
