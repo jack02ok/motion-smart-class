@@ -196,27 +196,36 @@ export class UIManager {
 
         <!-- TEACHER STUDIO & CLASS MANAGEMENT MODAL -->
         <div id="teacher-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="teacher-modal-title">
-          <div class="modal-card">
-            <div class="modal-header">
-              <h2 id="teacher-modal-title">👨‍🏫 TEACHER STUDIO & PENGATURAN KELAS</h2>
+          <div class="modal-card admin-studio-card">
+            <div class="modal-header admin-studio-header">
+              <div class="admin-title-group">
+                <span class="admin-title-icon" aria-hidden="true">🛡️</span>
+                <div>
+                  <span id="teacher-modal-eyebrow" class="admin-title-eyebrow">PUSAT KONTROL PEMBELAJARAN</span>
+                  <h2 id="teacher-modal-title">Studio Kontribusi Soal</h2>
+                  <p id="teacher-modal-subtitle">Kirim dan pantau soal untuk mendukung pembelajaran aktif.</p>
+                </div>
+              </div>
               <button id="btn-teacher-close" class="modal-close-btn" aria-label="Tutup Mode Guru">&times;</button>
             </div>
 
             <div id="teacher-dashboard-section" class="teacher-dashboard-section">
               <div class="studio-access-panel">
-                <div id="studio-public-session" class="studio-database-note"><span aria-hidden="true">☁️</span><div><strong>Kontribusi tanpa login</strong><p>Pengguna dapat mengirim soal melalui sesi anonim. Pengaturan aplikasi dan publikasi soal hanya tersedia untuk admin.</p></div><button id="btn-admin-login-open" class="secondary-btn btn-sm" type="button">🔐 Masuk Admin</button></div>
+                <div id="studio-public-session" class="studio-database-note"><span class="studio-access-icon" aria-hidden="true">☁️</span><div><span class="studio-access-kicker">AKSES PUBLIK</span><strong>Kontribusi tanpa login</strong><p>Pengguna dapat mengirim soal melalui sesi anonim. Pengaturan aplikasi dan publikasi soal hanya tersedia untuk admin.</p></div><button id="btn-admin-login-open" class="secondary-btn btn-sm" type="button">🔐 Masuk Admin</button></div>
                 <form id="admin-login-form" class="admin-login-form hidden" autocomplete="on">
-                  <div><strong>🔐 Login Administrator</strong><p>Gunakan akun Email/Password yang telah dibuat di Firebase Authentication.</p></div>
-                  <label>Email admin<input id="admin-email" type="email" autocomplete="username" required /></label>
-                  <label>Password<input id="admin-password" type="password" autocomplete="current-password" required /></label>
-                  <button id="btn-admin-login" class="primary-btn" type="submit">Masuk</button>
-                  <button id="btn-admin-login-cancel" class="secondary-btn" type="button">Batal</button>
+                  <div class="admin-login-intro"><span class="admin-login-icon" aria-hidden="true">🔐</span><div><span class="studio-access-kicker">AREA TERBATAS</span><strong>Login Administrator</strong><p>Masuk dengan akun admin yang terdaftar di Firebase Authentication.</p></div></div>
+                  <div class="admin-login-fields">
+                    <label>Email admin<input id="admin-email" type="email" autocomplete="username" placeholder="nama@sekolah.id" required /></label>
+                    <label>Password<input id="admin-password" type="password" autocomplete="current-password" placeholder="Masukkan password" required /></label>
+                  </div>
+                  <div class="admin-login-actions"><button id="btn-admin-login" class="primary-btn" type="submit">Masuk ke Dashboard</button><button id="btn-admin-login-cancel" class="secondary-btn" type="button">Batal</button></div>
                   <div id="admin-login-feedback" class="admin-login-feedback hidden" role="alert"></div>
+                  <p class="admin-login-security">🛡️ Kredensial diverifikasi langsung oleh Firebase dan tidak disimpan di aplikasi.</p>
                 </form>
-                <div id="admin-session-panel" class="admin-session-panel hidden"><div><strong>🛡️ Mode Admin Aktif</strong><span id="admin-session-email"></span></div><button id="btn-admin-logout" class="secondary-btn btn-sm" type="button">Keluar Admin</button></div>
+                <div id="admin-session-panel" class="admin-session-panel hidden"><span class="admin-session-icon" aria-hidden="true">✓</span><div><span class="studio-access-kicker">AKSES TERVERIFIKASI</span><strong>Mode Admin Aktif</strong><span id="admin-session-email"></span></div><span class="admin-session-badge">Owner / Super Admin</span><button id="btn-admin-logout" class="secondary-btn btn-sm" type="button">Keluar</button></div>
               </div>
               <!-- Tabs -->
-              <div class="modal-tabs">
+              <div class="modal-tabs" aria-label="Navigasi Studio">
                 <button class="tab-btn active" data-tab="tab-add-question" data-access="public">➕ Kirim Soal</button>
                 <button class="tab-btn" data-tab="tab-my-submissions" data-access="public">📝 Kontribusi Saya</button>
                 <button class="tab-btn" data-tab="tab-review-submissions" data-access="admin">✅ Review Soal</button>
@@ -2164,7 +2173,7 @@ export class UIManager {
             <div id="realtime-calibration-card" class="realtime-calibration-card state-searching" role="status" aria-live="polite">
               <div class="realtime-score-ring">
                 <strong id="calib-quality-value">0%</strong>
-                <span>Kualitas</span>
+                <span>Min. 75%</span>
               </div>
               <div class="realtime-calibration-copy">
                 <div class="realtime-calibration-heading">
@@ -2335,7 +2344,7 @@ export class UIManager {
 
     const quality = Number.isFinite(calibration.quality) ? calibration.quality : Math.round((telemetry.poseConfidence || 0) * 100);
     const stability = Number.isFinite(calibration.stability) ? calibration.stability : 0;
-    const state = telemetry.detectorError ? "error" : calibration.stableReady ? "ready" : calibration.allReady ? "locking" : quality >= 45 ? "adjusting" : "searching";
+    const state = telemetry.detectorError ? "error" : calibration.stableReady ? "ready" : calibration.meetsPlayThreshold ? "locking" : quality >= 45 ? "adjusting" : "searching";
     const statusLabels = {
       ready: "Tubuh terkunci dan siap",
       locking: `Mengunci posisi… ${calibration.readyProgress || 0}%`,
@@ -2414,9 +2423,9 @@ export class UIManager {
         startBtn.classList.add("disabled");
         startBtn.setAttribute("disabled", "true");
         startBtn.classList.remove("ready-pulse");
-        startText.textContent = calibration.allReady
+        startText.textContent = calibration.meetsPlayThreshold
           ? `Menstabilkan Posisi… ${calibration.readyProgress || 0}%`
-          : "Posisikan Tubuh di Dalam Bingkai...";
+          : `Capai Kualitas 75% untuk Bermain (${quality}%)`;
       }
     }
   }
@@ -3121,7 +3130,12 @@ export class UIManager {
     document.getElementById("admin-login-form")?.classList.add("hidden");
     document.getElementById("admin-session-email").textContent = isAdmin ? (this.adminSession.user.email || "Administrator") : "";
     document.getElementById("studio-button-label").textContent = isAdmin ? "Admin" : "Studio";
-    document.getElementById("teacher-modal-title").textContent = isAdmin ? "🛡️ ADMIN STUDIO & PENGATURAN APLIKASI" : "🎒 STUDIO KONTRIBUSI SOAL";
+    document.getElementById("teacher-modal-title").textContent = isAdmin ? "Dashboard Administrator" : "Studio Kontribusi Soal";
+    document.getElementById("teacher-modal-eyebrow").textContent = isAdmin ? "PUSAT KONTROL APLIKASI" : "RUANG KONTRIBUSI PENDIDIK";
+    document.getElementById("teacher-modal-subtitle").textContent = isAdmin
+      ? "Kelola bank soal, data pembelajaran, media, dan pengaturan aplikasi."
+      : "Kirim dan pantau soal untuk mendukung pembelajaran aktif.";
+    document.getElementById("teacher-modal")?.classList.toggle("admin-authenticated", isAdmin);
   }
 
   showAdminLoginForm() {

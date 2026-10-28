@@ -426,7 +426,7 @@ async function runTests() {
   );
   console.log("✓ classifyArenaZone (Zone A Reach): PASS");
 
-  const { PoseDetector, smoothPoseLandmarks, getPoseDiagnostics } = await import("../src/engine/PoseDetector.js");
+  const { PoseDetector, smoothPoseLandmarks, getPoseDiagnostics, CALIBRATION_PLAY_THRESHOLD } = await import("../src/engine/PoseDetector.js");
   const previousPose = [{ x: 0.4, y: 0.4, z: 0, visibility: 0.9 }];
   const jitteredPose = [{ x: 0.6, y: 0.6, z: 0, visibility: 0.9 }];
   const smoothedPose = smoothPoseLandmarks(previousPose, jitteredPose);
@@ -441,6 +441,26 @@ async function runTests() {
   upperBodyOnly[23].visibility = 0.1;
   upperBodyOnly[24].visibility = 0.1;
   assert.strictEqual(calibrationPose.checkCalibration(upperBodyOnly).allReady, true, "Half-body calibration must not require hips or knees");
+
+  const thresholdPose = upperBodyOnly.map((point) => ({ ...point }));
+  [0, 11, 12, 13, 14, 15, 16].forEach((index) => { thresholdPose[index].visibility = 0.62; });
+  const thresholdCalibration = calibrationPose.checkCalibration(thresholdPose);
+  assert.strictEqual(thresholdCalibration.quality, CALIBRATION_PLAY_THRESHOLD, "Calibration fixture must represent exactly 75% quality");
+  assert.strictEqual(thresholdCalibration.meetsPlayThreshold, true, "75% upper-body calibration must allow gameplay");
+
+  const thresholdRealtimePose = new PoseDetector();
+  let thresholdLiveCalibration = null;
+  thresholdRealtimePose.isDetecting = true;
+  thresholdRealtimePose.onResultsCallback = ({ calibration }) => { thresholdLiveCalibration = calibration; };
+  for (let frame = 0; frame < 10; frame++) {
+    thresholdRealtimePose.handleResults({ poseLandmarks: thresholdPose });
+  }
+  assert.strictEqual(thresholdLiveCalibration.stableReady, true, "A stable 75% calibration must unlock gameplay");
+
+  const belowThresholdPose = upperBodyOnly.map((point) => ({ ...point }));
+  [0, 11, 12, 13, 14, 15, 16].forEach((index) => { belowThresholdPose[index].visibility = 0.6; });
+  assert.ok(calibrationPose.checkCalibration(belowThresholdPose).quality < CALIBRATION_PLAY_THRESHOLD);
+  assert.strictEqual(calibrationPose.checkCalibration(belowThresholdPose).meetsPlayThreshold, false, "Calibration below 75% must remain locked");
 
   let liveCalibration = null;
   calibrationPose.isDetecting = true;

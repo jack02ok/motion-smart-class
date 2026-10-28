@@ -4873,3 +4873,368 @@ body {
   .admin-login-feedback { grid-column: auto; }
   .admin-session-panel, .studio-database-note { align-items: stretch; flex-direction: column; }
 }
+
+/* Premium administrator workspace */
+.admin-studio-card {
+  width: min(1440px, calc(100vw - 36px));
+  max-width: none;
+  height: min(920px, calc(100dvh - 36px));
+  max-height: none;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 24px;
+  background: #f4f7fb;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, .28);
+}
+
+.admin-studio-header {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 104px;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(148, 163, 184, .22);
+  background:
+    radial-gradient(circle at 82% 20%, rgba(99, 102, 241, .14), transparent 27%),
+    linear-gradient(115deg, #ffffff 0%, #f5f8ff 62%, #eef2ff 100%);
+}
+
+.admin-title-group {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 0;
+}
+
+.admin-title-icon,
+.admin-login-icon,
+.studio-access-icon,
+.admin-session-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 50px;
+  height: 50px;
+  border-radius: 15px;
+  background: linear-gradient(145deg, #3157a4, #5b46e8);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(49, 87, 164, .23);
+  font-size: 1.35rem;
+}
+
+.admin-title-eyebrow,
+.studio-access-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: #5b46e8;
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+  line-height: 1.2;
+}
+
+.admin-studio-header h2 {
+  margin: 0;
+  color: #142b4a;
+  font-size: clamp(1.18rem, 2vw, 1.55rem);
+  letter-spacing: -.02em;
+}
+
+.admin-studio-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: .84rem;
+  line-height: 1.4;
+}
+
+.admin-studio-header .modal-close-btn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .8);
+  color: #52647d;
+  line-height: 1;
+  transition: background .18s ease, color .18s ease, transform .18s ease;
+}
+
+.admin-studio-header .modal-close-btn:hover {
+  background: #fff;
+  color: #172b4d;
+  transform: rotate(4deg);
+}
+
+.admin-studio-card .teacher-dashboard-section {
+  display: grid;
+  grid-template-columns: 245px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  background: #f4f7fb;
+}
+
+.admin-studio-card .studio-access-panel {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.admin-studio-card .modal-tabs {
+  position: relative;
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 49px 10px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid #dfe6f0;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .05);
+}
+
+.admin-studio-card .modal-tabs::before {
+  content: "MENU STUDIO";
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  color: #8190a5;
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .13em;
+}
+
+.admin-authenticated .admin-studio-card .modal-tabs::before { content: "MENU ADMINISTRATOR"; }
+
+.admin-studio-card .modal-tabs .tab-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #52647d;
+  font-size: .82rem;
+  text-align: left;
+  white-space: normal;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.admin-studio-card .modal-tabs .tab-btn:hover {
+  border-color: #dce5f2;
+  background: #f7f9fd;
+  color: #263f68;
+  transform: translateX(2px);
+}
+
+.admin-studio-card .modal-tabs .tab-btn.active {
+  border-color: #cbd5ff;
+  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+  color: #4338ca;
+  box-shadow: inset 3px 0 0 #5b46e8;
+}
+
+.admin-studio-card .teacher-dashboard-section > .tab-content {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(18px, 2.3vw, 28px);
+  overflow: auto;
+  border: 1px solid #dfe6f0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .05);
+}
+
+.admin-studio-card .studio-database-note,
+.admin-studio-card .admin-session-panel {
+  min-height: 76px;
+  margin: 0;
+  padding: 13px 15px;
+  border-color: #dbe5f2;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff, #f5f8ff);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .045);
+}
+
+.admin-studio-card .studio-access-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #0f8b8d, #3157a4);
+  font-size: 1.05rem;
+}
+
+.admin-studio-card .studio-database-note strong,
+.admin-studio-card .admin-session-panel strong,
+.admin-login-intro strong {
+  color: #183252;
+  font-size: .93rem;
+}
+
+.admin-studio-card .studio-database-note .secondary-btn,
+.admin-studio-card .admin-session-panel .secondary-btn {
+  align-self: center;
+  min-width: 132px;
+}
+
+.admin-login-form {
+  grid-template-columns: minmax(240px, .8fr) minmax(360px, 1.3fr) auto;
+  gap: 14px 18px;
+  align-items: center;
+  margin: 0;
+  padding: 18px;
+  border-color: #cfd8ff;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #fff, #f5f3ff 52%, #eef5ff);
+  box-shadow: 0 12px 32px rgba(67, 56, 202, .08);
+}
+
+.admin-login-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-login-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  font-size: 1.05rem;
+}
+
+.admin-login-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-login-form .admin-login-fields label { gap: 7px; }
+
+.admin-login-form input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-color: #cbd5e1;
+  border-radius: 11px;
+  color: #172b4d;
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.admin-login-form input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, .12);
+}
+
+.admin-login-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-login-actions .primary-btn,
+.admin-login-actions .secondary-btn {
+  min-height: 44px;
+  padding: 9px 15px;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+
+.admin-login-feedback,
+.admin-login-security {
+  grid-column: 1 / -1;
+}
+
+.admin-login-form .admin-login-security {
+  margin: -4px 0 0;
+  color: #64748b;
+  font-size: .72rem;
+}
+
+.admin-session-panel { justify-content: flex-start; }
+
+.admin-session-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #059669, #0f8b8d);
+  font-size: 1rem;
+}
+
+.admin-session-panel > div { flex: 1; }
+
+.admin-session-badge {
+  padding: 7px 10px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca !important;
+  font-size: .68rem !important;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+@media (max-width: 1050px) {
+  .admin-login-form { grid-template-columns: 1fr 1.35fr; }
+  .admin-login-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+@media (max-width: 820px) {
+  .modal-backdrop { padding: 0; }
+  .admin-studio-card {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .admin-studio-header { min-height: 94px; padding: 16px; }
+  .admin-title-icon { width: 44px; height: 44px; border-radius: 13px; }
+  .admin-studio-header p { display: none; }
+  .admin-studio-card .teacher-dashboard-section {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  .admin-studio-card .studio-access-panel { grid-column: 1; grid-row: 1; }
+  .admin-studio-card .modal-tabs {
+    grid-column: 1;
+    grid-row: 2;
+    flex-direction: row;
+    padding: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 14px;
+  }
+  .admin-studio-card .modal-tabs::before { display: none; }
+  .admin-studio-card .modal-tabs .tab-btn { width: auto; min-width: max-content; }
+  .admin-studio-card .modal-tabs .tab-btn:hover { transform: none; }
+  .admin-studio-card .modal-tabs .tab-btn.active { box-shadow: inset 0 -3px 0 #5b46e8; }
+  .admin-studio-card .teacher-dashboard-section > .tab-content {
+    grid-column: 1;
+    grid-row: 3;
+    border-radius: 14px;
+  }
+  .admin-login-form { grid-template-columns: 1fr; max-height: calc(100dvh - 125px); overflow-y: auto; }
+  .admin-login-fields { grid-template-columns: 1fr; }
+  .admin-login-actions { grid-column: auto; justify-content: stretch; }
+  .admin-login-actions > * { flex: 1; }
+  .admin-login-feedback, .admin-login-security { grid-column: auto; }
+}
+
+@media (max-width: 560px) {
+  .admin-studio-header { min-height: 84px; }
+  .admin-title-icon { display: none; }
+  .admin-title-eyebrow { font-size: .59rem; }
+  .admin-studio-card .studio-database-note,
+  .admin-studio-card .admin-session-panel { align-items: stretch; }
+  .admin-session-badge { align-self: flex-start; }
+  .admin-studio-card .studio-database-note .secondary-btn,
+  .admin-studio-card .admin-session-panel .secondary-btn { align-self: stretch; }
+}

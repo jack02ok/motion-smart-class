@@ -33,6 +33,7 @@ export function smoothPoseLandmarks(previous, current) {
 // Half-body mode: head, shoulders, elbows, and wrists are sufficient for calibration.
 // Hips and knees remain optional inputs that can improve squat detection when visible.
 const POSE_KEY_INDICES = [0, 11, 12, 13, 14, 15, 16];
+export const CALIBRATION_PLAY_THRESHOLD = 75;
 
 function landmarkVisibility(point) {
   return point && Number.isFinite(point.visibility) ? point.visibility : point ? 0.8 : 0;
@@ -319,7 +320,7 @@ export class PoseDetector {
 
     // Calibration checklist
     const calibration = this.checkCalibration(landmarks, previousLandmarks);
-    this.readyFrameCount = calibration.allReady
+    this.readyFrameCount = calibration.meetsPlayThreshold
       ? Math.min(10, this.readyFrameCount + 1)
       : Math.max(0, this.readyFrameCount - 2);
     calibration.readyProgress = Math.round((this.readyFrameCount / 10) * 100);
@@ -440,6 +441,7 @@ export class PoseDetector {
         body: false,
         idealPosition: false,
         allReady: false,
+        meetsPlayThreshold: false,
         guidance: "Masuk ke area kamera hingga tubuh terlihat.",
         ...diagnostics
       };
@@ -493,13 +495,17 @@ export class PoseDetector {
     }
 
     const allReady = head && shoulders && hands && body && idealPosition;
+    // A perfect checklist is helpful, but gameplay only requires reliable upper-body
+    // landmarks. At 75% quality, head, shoulders, and both hands are sufficient.
+    const meetsPlayThreshold = diagnostics.quality >= CALIBRATION_PLAY_THRESHOLD && head && shoulders && hands;
 
     let guidance = "Posisi baik. Diam sejenak untuk mengunci kalibrasi.";
     if (!head) guidance = "Pastikan kepala terlihat dan tidak terpotong kamera.";
     else if (!shoulders) guidance = "Mundurkan badan hingga kedua bahu terlihat.";
     else if (!hands) guidance = "Tampilkan kedua tangan di dalam bingkai kamera.";
-    else if (!body) guidance = "Pastikan dada dan kedua siku terlihat di dalam bingkai.";
-    else if (!idealPosition) guidance = "Berdiri di tengah dan sesuaikan jarak dari kamera.";
+    else if (meetsPlayThreshold && !allReady) guidance = "Kualitas sudah 75%. Diam sejenak untuk mulai bermain.";
+    else if (!body) guidance = "Pastikan dada dan kedua siku terlihat, atau capai kualitas minimal 75%.";
+    else if (!idealPosition) guidance = "Berdiri di tengah, atau pertahankan kualitas deteksi minimal 75%.";
     else if (diagnostics.quality < 65) guidance = "Tambah pencahayaan agar bentuk tubuh lebih jelas.";
     else if (diagnostics.stability > 0 && diagnostics.stability < 65) guidance = "Diam sejenak agar posisi dapat dikunci.";
 
@@ -510,6 +516,7 @@ export class PoseDetector {
       body,
       idealPosition,
       allReady,
+      meetsPlayThreshold,
       guidance,
       ...diagnostics
     };
